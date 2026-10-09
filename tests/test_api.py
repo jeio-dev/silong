@@ -578,6 +578,7 @@ class PageTest(ApiTestCase):
     ASSETS = {
         "/static/report.js": "javascript",
         "/static/board.js": "javascript",
+        "/static/outbox.js": "javascript",
         "/static/style.css": "text/css",
     }
 
