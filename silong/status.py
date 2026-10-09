@@ -189,10 +189,10 @@ async def check_model(
     `/api/ps` with a total wall-clock bound of `timeout` seconds.
 
     No model returns `not_configured` without importing or probing anything.
-    Otherwise an exact loaded-tag match (a missing tag is normalized to
-    `:latest`) gives `loaded`, a valid response without that model gives
-    `not_loaded`, and a timeout, bad JSON/schema or HTTP failure gives
-    `unavailable`. No generate/chat/load request is ever sent.
+    Otherwise an exact loaded-tag match on an entry's `name` or `model` (a
+    missing tag is normalized to `:latest`) gives `loaded`, a valid response
+    without that model gives `not_loaded`, and a timeout, bad JSON/schema
+    (including an entry with neither tag) or HTTP failure gives `unavailable`. No generate/chat/load request is ever sent.
     """
     if not model:
         return ("not_configured", None)
@@ -225,13 +225,23 @@ async def check_model(
     models = body.get("models")
     if not isinstance(models, list):
         return ("unavailable", checked_at)
+    # Each entry must be an object naming its model by `name` and/or `model`;
+    # any other entry shape means the reply cannot be trusted as a "not loaded".
     want = _normalize_tag(model)
+    usable = True
     for entry in models:
+        tags = []
         if isinstance(entry, dict):
-            name = entry.get("name")
-            if isinstance(name, str) and _normalize_tag(name) == want:
-                return ("loaded", checked_at)
-    return ("not_loaded", checked_at)
+            tags = [
+                entry.get(key)
+                for key in ("name", "model")
+                if isinstance(entry.get(key), str) and entry.get(key).strip()
+            ]
+        if not tags:
+            usable = False
+        elif any(_normalize_tag(tag) == want for tag in tags):
+            return ("loaded", checked_at)
+    return ("not_loaded" if usable else "unavailable", checked_at)
 
 
 def make_qr_svg(url: str) -> bytes:

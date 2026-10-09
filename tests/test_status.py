@@ -264,10 +264,25 @@ class CheckModelTest(unittest.TestCase):
                 state, _ = self.run_check("gemma4:e2b", transport=transport)
                 self.assertEqual(state, "unavailable")
 
-    def test_non_dict_entries_are_ignored_as_not_loaded(self):
-        transport = httpx.MockTransport(lambda request: httpx.Response(200, json={"models": [1, 2]}))
-        state, _ = self.run_check("gemma4:e2b", transport=transport)
+    def test_model_field_matches_like_name(self):
+        for entry in ({"model": "gemma4:e2b"}, {"name": 5, "model": "gemma4:e2b"}, {"name": "x:1", "model": "gemma4:e2b"}):
+            with self.subTest(entry=entry):
+                state, _ = self.run_check("gemma4:e2b", {"models": [entry]})
+                self.assertEqual(state, "loaded")
+        state, _ = self.run_check("gemma4", {"models": [{"model": "gemma4:latest"}]})
+        self.assertEqual(state, "loaded")
+        state, _ = self.run_check("gemma4:e2b", {"models": [{"model": "qwen3:4b"}]})
         self.assertEqual(state, "not_loaded")
+
+    def test_unusable_entries_are_unavailable(self):
+        for models in ([5], [{}], [1, 2], [{"name": ""}], [{"name": None, "model": 3}], [{"name": "qwen3:4b"}, {}]):
+            with self.subTest(models=models):
+                state, _ = self.run_check("gemma4:e2b", {"models": models})
+                self.assertEqual(state, "unavailable")
+
+    def test_match_wins_over_an_unusable_sibling_entry(self):
+        state, _ = self.run_check("gemma4:e2b", {"models": [{}, {"name": "gemma4:e2b"}]})
+        self.assertEqual(state, "loaded")
 
     def test_connect_error_is_unavailable(self):
         transport = httpx.MockTransport(_failing(httpx.ConnectError("refused")))
