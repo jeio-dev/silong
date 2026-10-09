@@ -1,3 +1,4 @@
+import json
 import os
 import socket
 import sqlite3
@@ -6,10 +7,12 @@ import sys
 import tempfile
 import time
 import unittest
+import urllib.parse
 import urllib.request
 import uuid
-from contextlib import closing
+from contextlib import closing, contextmanager
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 from fastapi.testclient import TestClient
@@ -28,6 +31,53 @@ TEXT_B = "Kailangan ng tubig sa Room 5, tatlong bata."
 
 def _no_network(*args, **kwargs):
     raise AssertionError("request handling must not open network connections")
+
+
+def _free_port():
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        return probe.getsockname()[1]
+
+
+def _get(port, path):
+    with urllib.request.urlopen(f"http://127.0.0.1:{port}{path}", timeout=5) as response:
+        return response.status, response.read()
+
+
+def _post_report(port, client_id, text):
+    body = urllib.parse.urlencode({"client_id": client_id, "text": text}).encode()
+    with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/reports", body, timeout=5) as response:
+        return json.load(response)
+
+
+@contextmanager
+def _running_hub(db_path, port, **extra_env):
+    """Run a real `python -m silong` until it serves, then stop it on exit.
+
+    The yielded object's `output` holds the server log once the block ends.
+    """
+    env = dict(os.environ, SILONG_PORT=str(port), SILONG_DB=str(db_path), **extra_env)
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "silong"],
+        cwd=REPO_ROOT,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    hub = SimpleNamespace(proc=proc, output="")
+    try:
+        deadline = time.monotonic() + 15
+        while proc.poll() is None and time.monotonic() < deadline:
+            try:
+                _get(port, "/api/reports")
+                break
+            except OSError:
+                time.sleep(0.1)
+        yield hub
+    finally:
+        proc.terminate()
+        hub.output, _ = proc.communicate(timeout=15)
 
 
 class ApiTestCase(unittest.TestCase):
@@ -362,40 +412,14 @@ class LauncherTest(unittest.TestCase):
         self.assertEqual(app.state.config.db_path, Path(tmp) / "hub.db")
 
     def test_real_launch_serves_in_one_process_despite_web_concurrency(self):
-        with socket.socket() as probe:
-            probe.bind(("127.0.0.1", 0))
-            port = probe.getsockname()[1]
         with tempfile.TemporaryDirectory() as tmp:
-            env = dict(
-                os.environ,
-                WEB_CONCURRENCY="2",
-                SILONG_PORT=str(port),
-                SILONG_DB=str(Path(tmp) / "hub.db"),
-            )
-            proc = subprocess.Popen(
-                [sys.executable, "-m", "silong"],
-                cwd=REPO_ROOT,
-                env=env,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-            )
-            try:
-                status = None
-                deadline = time.monotonic() + 15
-                while status is None and proc.poll() is None and time.monotonic() < deadline:
-                    try:
-                        with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/reports", timeout=1) as response:
-                            status = response.status
-                    except OSError:
-                        time.sleep(0.1)
-            finally:
-                proc.terminate()
-                output, _ = proc.communicate(timeout=15)
+            port = _free_port()
+            with _running_hub(Path(tmp) / "hub.db", port, WEB_CONCURRENCY="2") as hub:
+                status = _get(port, "/api/reports")[0]
 
-        self.assertEqual(status, 200, output)
-        self.assertIn(f"Started server process [{proc.pid}]", output)
-        self.assertIn(f"Uvicorn running on http://0.0.0.0:{port}", output)
+        self.assertEqual(status, 200, hub.output)
+        self.assertIn(f"Started server process [{hub.proc.pid}]", hub.output)
+        self.assertIn(f"Uvicorn running on http://0.0.0.0:{port}", hub.output)
 
     def test_invalid_config_exits_with_message(self):
         with mock.patch.dict("os.environ", {"SILONG_PORT": "abc"}), mock.patch.object(
@@ -405,6 +429,32 @@ class LauncherTest(unittest.TestCase):
         run.assert_not_called()
         written = "".join(call.args[0] for call in stderr.write.call_args_list)
         self.assertIn("SILONG_PORT", written)
+
+
+class RestartIntegrationTest(unittest.TestCase):
+    def test_report_survives_hub_restart_and_repeat_keeps_one_row(self):
+        client_id = str(uuid.uuid4())
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "hub.db"
+            port = _free_port()
+            with _running_hub(path, port) as hub:
+                first = _post_report(port, client_id, TEXT_A)
+                board_status, board_page = _get(port, "/board")
+                listed = json.loads(_get(port, "/api/reports")[1])
+            self.assertIn("Application shutdown complete", hub.output)
+
+            with _running_hub(path, port) as hub:
+                repeat = _post_report(port, client_id, TEXT_B)
+                after = json.loads(_get(port, "/api/reports")[1])
+            self.assertIn("Application shutdown complete", hub.output)
+
+        self.assertEqual(first, {"id": first["id"], "status": "queued"})
+        self.assertEqual(board_status, 200)
+        self.assertIn(b"board.js", board_page)
+        self.assertEqual([(r["id"], r["raw_text"]) for r in listed], [(first["id"], TEXT_A)])
+        self.assertEqual(repeat, first)
+        self.assertEqual(len(after), 1)
+        self.assertEqual(after[0], listed[0])
 
 
 if __name__ == "__main__":
