@@ -13,3 +13,7 @@ The required gate attempt `python -m unittest discover -s tests -v` exited 127 b
 The assistant incorrectly added a completed administrative task T6 to the phase and used `(01-T6)` in the original commit message to fit the task-ID format. Following the user's correction, that entry and its publication bookkeeping were removed from the phase plan and the PR description. The original pushed commit is preserved as history; the correction uses a planning-only documentation message without a phase task ID. The erroneous identifier is withdrawn, not evidence of phase progress.
 
 Verification for the correction: structural validator passed, staged whitespace check exited 0, and task-list inspection confirmed only unchecked T1–T5 remain. No implementation instructions, acceptance criteria, or test plans for those tasks changed; their existing independent review remains applicable. Phase-summary confirmation is still pending.
+
+## Phase 01 wording correction — 2026-10-09
+
+After the documentation alignment commit `2fa9eca`, the user requested a Phase 01 plan revision. The plan's Constraints and Starting points no longer describe the user's documents as untracked and now reflect the current `GITFLOW.md` scopes and docs-only gate exemption. T1's import check uses `python_multipart` instead of `multipart`. No outcome, scope, task, or acceptance criterion changed; the recorded plan reviews remain applicable. Structural validator passed. Phase-summary confirmation is still pending.
