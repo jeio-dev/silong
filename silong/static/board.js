@@ -20,6 +20,22 @@ const SECTIONS = {
   resolved: { list: document.getElementById("resolved"), count: document.getElementById("resolved-count") },
 };
 
+// Hub status header, polled independently of the report list.
+const statusNote = document.getElementById("status-note");
+const phoneUrl = document.getElementById("phone-url");
+const phoneUrlWrap = document.getElementById("phone-url-wrap");
+const phoneUrlUnavailable = document.getElementById("phone-url-unavailable");
+const phoneQr = document.getElementById("phone-qr");
+const modelStatus = document.getElementById("model-status");
+const workerNote = document.getElementById("worker-note");
+const audioStatus = document.getElementById("audio-status");
+const queueStatus = document.getElementById("queue-status");
+const processingStatus = document.getElementById("processing-status");
+const reportsToday = document.getElementById("reports-today");
+const localDate = document.getElementById("local-date");
+const urgencyCounts = document.getElementById("urgency-counts");
+const URGENCY_ORDER = ["critical", "high", "medium", "low"];
+
 // Unclassified reports never carry an urgency word.
 const STATUS_LABELS = {
   queued: "Queued: waiting for triage, no urgency assigned",
@@ -45,6 +61,12 @@ let lastReports = [];
 let lastSuccess = null;
 let requested = 0;
 let rendered = 0;
+
+// Status header state (kept across failed polls, with a stale warning).
+let lastStatus = null;
+let statusEverLoaded = false;
+let statusInFlight = false;
+let lastQrUrl = null;
 
 function timeText(date) {
   return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
@@ -528,9 +550,96 @@ async function act(id, method, path, body) {
   }
 }
 
+function modelText(status) {
+  if (!status.model) return "No model configured; reports stay queued for triage.";
+  const checked = status.model_checked_at ? " (last checked " + timeText(new Date(status.model_checked_at)) + ")" : "";
+  if (status.model_state === "loaded") return "Loaded in Ollama: " + status.model + checked;
+  if (status.model_state === "not_loaded") return "Not loaded: " + status.model + checked;
+  if (status.model_state === "unavailable") return "Model unavailable: " + status.model + checked;
+  return "Model: " + status.model;
+}
+
+// Show the last successful status. Counts come only from that response; a
+// failed or held status poll leaves them untouched and just shows a warning.
+function renderStatus() {
+  const status = lastStatus;
+  if (!status) return;
+
+  if (status.hub_url) {
+    phoneUrl.textContent = status.hub_url;
+    phoneUrl.href = status.hub_url;
+    phoneUrlWrap.hidden = false;
+    phoneUrlUnavailable.hidden = true;
+    if (status.hub_url !== lastQrUrl) {
+      lastQrUrl = status.hub_url;
+      phoneQr.src = "/api/qr";
+      phoneQr.hidden = false;
+    }
+  } else {
+    phoneUrlWrap.hidden = true;
+    phoneQr.hidden = true;
+    if (lastQrUrl !== null) {
+      lastQrUrl = null;
+      phoneQr.removeAttribute("src");
+    }
+    phoneUrlUnavailable.hidden = false;
+    phoneUrlUnavailable.textContent =
+      "No phone address is shown. Open this board from the hub's Wi-Fi IPv4 address (for example http://192.168.1.20/board) or set SILONG_HUB_URL to that address.";
+  }
+
+  modelStatus.textContent = modelText(status);
+  workerNote.hidden = !(status.model && status.model_state === "loaded" && !status.worker_running);
+  if (!workerNote.hidden) workerNote.textContent = "The triage worker is not running.";
+  audioStatus.textContent = status.audio_available ? "Audio accepted" : "Text only: audio unavailable";
+  queueStatus.textContent = "Queued: " + status.queue_length;
+  processingStatus.textContent = "Processing: " + status.processing_count;
+  reportsToday.textContent = status.reports_today + " report(s)";
+  localDate.textContent = status.local_date;
+
+  urgencyCounts.replaceChildren();
+  for (const level of URGENCY_ORDER) {
+    const item = element("li", "urgency-" + level);
+    item.append(element("span", "urgency-label", URGENCY_LABELS[level] || level));
+    item.append(element("span", "count", String(status.urgency_counts[level] ?? 0)));
+    urgencyCounts.append(item);
+  }
+}
+
+function setStatusStale(stale) {
+  statusNote.hidden = !stale;
+  if (stale) {
+    statusNote.textContent = "Status may be out of date; the values shown are the last received.";
+  }
+}
+
+async function loadStatus() {
+  if (statusInFlight) return;
+  statusInFlight = true;
+  try {
+    const response = await fetchWithTimeout("/api/status");
+    if (!response.ok) throw new Error("HTTP " + response.status);
+    const data = await response.json();
+    if (!data || typeof data !== "object" || typeof data.snapshot_at !== "string") throw new Error("unexpected response");
+    lastStatus = data;
+    statusEverLoaded = true;
+    setStatusStale(false);
+    renderStatus();
+  } catch (error) {
+    if (statusEverLoaded) setStatusStale(true);
+  } finally {
+    statusInFlight = false;
+  }
+}
+
+async function pollStatus() {
+  await loadStatus();
+  setTimeout(pollStatus, POLL_MS);
+}
+
 async function poll() {
   await load();
   setTimeout(poll, POLL_MS);
 }
 
 poll();
+pollStatus();

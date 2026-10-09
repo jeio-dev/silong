@@ -10,6 +10,40 @@
   <main class="page board">
     <h1>Silong staff board</h1>
     <p id="connection" class="connection" role="status" aria-live="polite">Connecting to the hub…</p>
+    <p id="status-note" class="warning" role="status" hidden></p>
+
+    <section class="status-header" aria-label="Hub status">
+      <div class="status-cell">
+        <h2>Phones report here</h2>
+        <p id="phone-url-wrap" hidden><a id="phone-url" class="phone-url" rel="noopener"></a></p>
+        <p id="phone-url-unavailable" class="hint" hidden></p>
+        <img id="phone-qr" alt="QR code for the phone address" width="168" height="168" hidden>
+      </div>
+      <div class="status-cell">
+        <h2>Model</h2>
+        <p id="model-status"></p>
+        <p id="worker-note" class="warning" hidden></p>
+      </div>
+      <div class="status-cell">
+        <h2>Audio</h2>
+        <p id="audio-status">Text only: audio unavailable</p>
+      </div>
+      <div class="status-cell">
+        <h2>Queue</h2>
+        <p id="queue-status" class="counts"></p>
+        <p id="processing-status" class="counts"></p>
+      </div>
+      <div class="status-cell">
+        <h2>Today</h2>
+        <p id="reports-today" class="counts"></p>
+        <p id="local-date" class="hint"></p>
+      </div>
+      <div class="status-cell">
+        <h2>Urgency (unresolved)</h2>
+        <ul id="urgency-counts" class="urgency-counts"></ul>
+      </div>
+    </section>
+
     <p id="empty" class="hint" hidden>No reports yet.</p>
 
     <section aria-labelledby="unclassified-heading">
