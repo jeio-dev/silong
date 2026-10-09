@@ -105,7 +105,7 @@ The status header at the top is refreshed every two seconds as well, separately 
 
 All counts come from one read of the database. If a status check fails, the last values stay on screen with "Status may be out of date; the values shown are the last received." They are never replaced with zeros.
 
-- **Not yet triaged** is shown first, so new and failed reports stay visible. Cards here never show an urgency; their state (Queued, Extracting, Triage failed) is shown as a labelled pill. A card that arrives or moves to another section after the board loads is outlined briefly (no animation when the device asks for reduced motion).
+- **Not yet triaged** is shown first (on wide screens, as a lane to the left of **Triaged**; on narrow screens, above it), so new and failed reports stay visible. Cards here never show an urgency; their state (Queued, Extracting, Triage failed) is shown as a labelled pill. A card that arrives or moves to another section after the board loads is outlined briefly (no animation when the device asks for reduced motion).
 - **Triaged** lists reports from most to least urgent; within an urgency, the oldest report comes first. Each card shows the urgency word and colour, the reason, the extracted fields, the summary, "Extraction took N.N s" (measured on the hub for that report), "Edited by staff" when staff changed it, and the original text under **Original report**.
 - **Edit** (or **Complete by hand** for a report without fields) opens a form for all fields. Saving recomputes the urgency. If the report changes while the form is open, the form says so instead of being replaced.
 - **Mark resolved** moves a report to the collapsed **Resolved** section; **Reopen** brings it back.

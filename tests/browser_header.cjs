@@ -201,12 +201,19 @@ async function main() {
       ["unclassified", "triaged", "resolved"].map((id) => document.querySelector('ol[id="' + id + '"]') !== null)
     );
     assert.deepStrictEqual(sections, [true, true, true], "three sections present");
-    const unclassFirst = await page.evaluate(
-      () =>
-        document.getElementById("unclassified").getBoundingClientRect().top <
-        document.getElementById("triaged").getBoundingClientRect().top
-    );
-    assert.ok(unclassFirst, "unclassified section is first");
+    // Reading order: unclassified is left of triaged when the lanes sit side by
+    // side, otherwise above it; both come before the resolved section.
+    const order = await page.evaluate(() => {
+      const box = (id) => document.getElementById(id).getBoundingClientRect();
+      const [unclassified, triaged, resolved] = [box("unclassified"), box("triaged"), box("resolved-heading")];
+      const sideBySide = unclassified.right <= triaged.left;
+      return {
+        unclassFirst: sideBySide || unclassified.top < triaged.top,
+        resolvedLast: resolved.top > Math.max(unclassified.bottom, triaged.bottom),
+      };
+    });
+    assert.ok(order.unclassFirst, "unclassified section is first");
+    assert.ok(order.resolvedLast, "resolved section comes after both lanes");
 
     // Unclassified cards never carry an urgency label.
     const unclassUrgency = await page.evaluate(

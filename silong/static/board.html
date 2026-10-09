@@ -38,19 +38,21 @@
 
     <p id="empty" class="hint" hidden>No reports yet.</p>
 
-    <section aria-labelledby="unclassified-heading">
-      <h2 id="unclassified-heading">Not yet triaged <span id="unclassified-count"></span></h2>
-      <p class="hint">These reports have no urgency assigned yet. Read each one; a failed report can be retried.</p>
-      <p id="unclassified-empty" class="empty-state" hidden>No reports waiting for triage.</p>
-      <ol id="unclassified" class="reports"></ol>
-    </section>
+    <div class="lanes">
+      <section aria-labelledby="unclassified-heading">
+        <h2 id="unclassified-heading">Not yet triaged <span id="unclassified-count"></span></h2>
+        <p class="hint">These reports have no urgency assigned yet. Read each one; a failed report can be retried.</p>
+        <p id="unclassified-empty" class="empty-state" hidden>No reports waiting for triage.</p>
+        <ol id="unclassified" class="reports"></ol>
+      </section>
 
-    <section aria-labelledby="triaged-heading">
-      <h2 id="triaged-heading">Triaged <span id="triaged-count"></span></h2>
-      <p class="hint">Most urgent first. Urgency comes from fixed rules, with the reason shown on each card.</p>
-      <p id="triaged-empty" class="empty-state" hidden>No triaged reports yet.</p>
-      <ol id="triaged" class="reports"></ol>
-    </section>
+      <section aria-labelledby="triaged-heading">
+        <h2 id="triaged-heading">Triaged <span id="triaged-count"></span></h2>
+        <p class="hint">Most urgent first. Urgency comes from fixed rules, with the reason shown on each card.</p>
+        <p id="triaged-empty" class="empty-state" hidden>No triaged reports yet.</p>
+        <ol id="triaged" class="reports"></ol>
+      </section>
+    </div>
 
     <section aria-labelledby="resolved-heading">
       <details class="resolved-section">

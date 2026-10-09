@@ -39,7 +39,18 @@ body {
 }
 
 .page.board {
-  max-width: 64rem;
+  max-width: 90rem;
+}
+
+/* Wide screens: untriaged reports beside the triaged list, so a card visibly
+   moves across when it is triaged. Resolved stays full width below. */
+@media (min-width: 60rem) {
+  .lanes {
+    display: grid;
+    grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+    gap: 0 1.5rem;
+    align-items: start;
+  }
 }
 
 h1 {
@@ -237,7 +248,7 @@ button:disabled {
   gap: 0.45rem;
   padding: 0.1rem 0.7rem;
   border: 2px solid var(--border);
-  border-radius: 999px;
+  border-radius: 0.75rem;
   background: var(--background);
   color: var(--text);
   font-size: 1rem;
