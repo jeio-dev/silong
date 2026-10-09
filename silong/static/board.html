@@ -4,17 +4,23 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Silong: staff board</title>
+  <link rel="icon" href="/static/silong-icon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/static/style.css">
 </head>
-<body>
+<body class="board-page">
+  <header class="topbar">
+    <div class="topbar-inner">
+      <span class="brand"><svg class="brand-mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true" focusable="false"><rect width="64" height="64" rx="14" fill="#14315C"/><path d="M11 31 L32 13 L53 31" fill="none" stroke="#FFFFFF" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/><circle cx="27" cy="38.5" r="4" fill="#FFFFFF"/><path d="M19.5 54 A7.5 7.5 0 0 1 34.5 54 Z" fill="#FFFFFF"/><circle cx="39" cy="43" r="3.2" fill="#F5A524"/><path d="M33.5 54 A5.5 5.5 0 0 1 44.5 54 Z" fill="#F5A524"/></svg><span class="brand-name">Silong</span></span>
+      <h1>Staff board</h1>
+      <p id="connection" class="connection" role="status" aria-live="polite">Connecting to the hub…</p>
+    </div>
+  </header>
   <main class="page board">
-    <h1>Silong staff board</h1>
-    <p id="connection" class="connection" role="status" aria-live="polite">Connecting to the hub…</p>
     <p id="status-note" class="warning" role="status" hidden></p>
 
     <section class="status-header" aria-label="Hub status">
-      <div class="connect">
-        <img id="phone-qr" alt="QR code for the phone address" width="140" height="140" hidden>
+      <div class="connect panel">
+        <div class="qr-frame"><img id="phone-qr" alt="QR code for the phone address" width="140" height="140" hidden></div>
         <div class="connect-text">
           <h2>Phones report here</h2>
           <p id="phone-url-wrap" hidden><a id="phone-url" class="phone-url" rel="noopener"></a></p>
@@ -24,7 +30,7 @@
           <p id="worker-note" class="warning" hidden></p>
         </div>
       </div>
-      <div class="stats">
+      <div class="stats panel">
         <h2 class="visually-hidden">Counts</h2>
         <ul class="stat-chips">
           <li class="stat"><span id="queue-status" class="counts"></span></li>
@@ -38,15 +44,30 @@
 
     <p id="empty" class="hint" hidden>No reports yet.</p>
 
+    <div class="board-tools">
+      <div class="search-field">
+        <label for="search" class="visually-hidden">Search reports</label>
+        <input id="search" type="search" placeholder="Search by #, place, name or words" autocomplete="off">
+      </div>
+      <div class="filters" role="group" aria-label="Show triaged reports by urgency">
+        <button type="button" class="filter" data-filter="all" aria-pressed="true">All</button>
+        <button type="button" class="filter filter-critical" data-filter="critical" aria-pressed="false">Critical</button>
+        <button type="button" class="filter filter-high" data-filter="high" aria-pressed="false">High</button>
+        <button type="button" class="filter filter-medium" data-filter="medium" aria-pressed="false">Medium</button>
+        <button type="button" class="filter filter-low" data-filter="low" aria-pressed="false">Low</button>
+      </div>
+      <p id="filter-note" class="filter-note" hidden></p>
+    </div>
+
     <div class="lanes">
-      <section aria-labelledby="unclassified-heading">
+      <section class="lane lane-untriaged" aria-labelledby="unclassified-heading">
         <h2 id="unclassified-heading">Not yet triaged <span id="unclassified-count"></span></h2>
         <p class="hint">These reports have no urgency assigned yet. Read each one; a failed report can be retried.</p>
         <p id="unclassified-empty" class="empty-state" hidden>No reports waiting for triage.</p>
         <ol id="unclassified" class="reports"></ol>
       </section>
 
-      <section aria-labelledby="triaged-heading">
+      <section class="lane lane-triaged" aria-labelledby="triaged-heading">
         <h2 id="triaged-heading">Triaged <span id="triaged-count"></span></h2>
         <p class="hint">Most urgent first. Urgency comes from fixed rules, with the reason shown on each card.</p>
         <p id="triaged-empty" class="empty-state" hidden>No triaged reports yet.</p>

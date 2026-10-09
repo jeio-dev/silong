@@ -45,6 +45,13 @@ const localDate = document.getElementById("local-date");
 const urgencyCounts = document.getElementById("urgency-counts");
 const URGENCY_ORDER = ["critical", "high", "medium", "low"];
 
+// Triaged-lane urgency filter and a search over every card's text. Both only
+// hide cards; a card whose edit form is open always stays visible.
+const search = document.getElementById("search");
+const filterButtons = document.querySelectorAll("button[data-filter]");
+const filterNote = document.getElementById("filter-note");
+let urgencyFilter = "all";
+
 // Unclassified reports never carry an urgency word.
 const STATUS_LABELS = {
   queued: "Queued: waiting for triage, no urgency assigned",
@@ -116,17 +123,17 @@ function sectionOf(report) {
   return report.urgency ? "triaged" : "unclassified";
 }
 
+// The extracted fields as compact label/value chips. Facts that add nothing
+// (unknown headcount, nobody injured, no vulnerable group) are left out; the
+// edit form still shows every field.
 function fieldList(fields) {
-  const rows = [
-    ["Location", fields.location === null ? "unknown" : fields.location],
-    ["In center", yesNo(fields.in_center)],
-    ["Reporting for others", yesNo(fields.on_behalf)],
-    ["People", fields.headcount === null ? "unknown" : String(fields.headcount)],
-    ["Vulnerable", terms(fields.vulnerable)],
-    ["Injured", fields.injured ? "yes" + (fields.injury_note ? ": " + fields.injury_note : "") : "no"],
-    ["Needs", terms(fields.needs)],
-  ];
-  if (fields.summary) rows.push(["Summary", fields.summary]);
+  const rows = [["Location", fields.location === null ? "unknown" : fields.location]];
+  if (fields.in_center !== null) rows.push(["In center", yesNo(fields.in_center)]);
+  if (fields.on_behalf) rows.push(["For others", "yes"]);
+  if (fields.headcount !== null) rows.push(["People", String(fields.headcount)]);
+  if (fields.vulnerable.length) rows.push(["Vulnerable", terms(fields.vulnerable)]);
+  if (fields.injured) rows.push(["Injured", fields.injury_note ? fields.injury_note : "yes"]);
+  rows.push(["Needs", terms(fields.needs)]);
   const list = element("dl", "fields");
   for (const [name, value] of rows) {
     const row = element("div", "field-row");
@@ -172,7 +179,6 @@ function reportCard(report) {
   const item = element("li", "report");
   item.dataset.id = report.id;
   const header = element("div", "report-header");
-  header.append(element("span", "reference", "#" + report.id));
 
   if (report.urgency) {
     const label = URGENCY_LABELS[report.urgency] || report.urgency;
@@ -183,19 +189,22 @@ function reportCard(report) {
   } else {
     header.append(element("span", "status status-" + report.status, STATUS_LABELS[report.status] || "Status: " + report.status));
   }
+  header.append(element("span", "reference", "#" + report.id));
   item.append(header);
 
-  if (report.urgency && report.fields) item.append(fieldList(report.fields));
-  const notes = [];
-  if (report.edited) notes.push("Edited by staff");
-  if (report.llm_ms !== null && report.llm_ms !== undefined) notes.push("Extraction took " + (report.llm_ms / 1000).toFixed(1) + " s");
-  if (notes.length) item.append(element("p", "report-notes", notes.join(" · ")));
+  if (report.urgency && report.fields) {
+    item.append(fieldList(report.fields));
+    if (report.fields.summary) item.append(element("p", "report-summary", report.fields.summary));
+  }
 
   item.append(original(report, section !== "unclassified"));
-  const meta = element("p", "report-meta");
-  meta.textContent = (report.reporter ? "From " + report.reporter + " · " : "Name not given · ") + receivedText(report.created_at);
-  item.append(meta);
   if (report.error && !report.urgency) item.append(element("p", "report-error", "Error: " + report.error));
+
+  const meta = [report.reporter ? "From " + report.reporter : "Name not given", receivedText(report.created_at)];
+  if (report.edited) meta.push("Edited by staff");
+  if (report.llm_ms !== null && report.llm_ms !== undefined) meta.push("Extraction took " + (report.llm_ms / 1000).toFixed(1) + " s");
+  const footer = element("div", "report-footer");
+  footer.append(element("p", "report-meta", meta.join(" · ")));
 
   const feedback = element("p", "card-feedback");
   feedback.setAttribute("role", "status");
@@ -212,7 +221,8 @@ function reportCard(report) {
     actions.append(actionButton(report.fields ? "Edit" : "Complete by hand", "edit", editClass, () => openEditor(item, report)));
     actions.append(actionButton("Mark resolved", "resolve", "secondary", () => act(report.id, "PATCH", path, { resolved: true })));
   }
-  item.append(actions, feedback);
+  footer.append(actions);
+  item.append(footer, feedback);
   showActionState(item, report.id);
   return item;
 }
@@ -484,8 +494,34 @@ function render(reports) {
   if (active !== document.activeElement && active && active.isConnected) active.focus({ preventScroll: true });
   for (const button of refocus) if (button) button.focus();
   empty.hidden = reports.length > 0;
+  applyFilters();
   renderedOnce = true;
 }
+
+function applyFilters() {
+  const query = search.value.trim().toLowerCase().replace(/^#/, "");
+  let shown = 0;
+  let total = 0;
+  for (const [id, entry] of cards) {
+    const urgencyMatch = entry.section !== "triaged" || urgencyFilter === "all" || entry.node.classList.contains("urgency-" + urgencyFilter);
+    const textMatch = !query || String(id) === query || entry.node.textContent.toLowerCase().includes(query);
+    entry.node.hidden = !editors.has(id) && !(urgencyMatch && textMatch);
+    total += 1;
+    if (!entry.node.hidden) shown += 1;
+  }
+  const filtering = Boolean(query) || urgencyFilter !== "all";
+  filterNote.hidden = !filtering;
+  filterNote.textContent = filtering ? "Showing " + shown + " of " + total + " reports" : "";
+}
+
+function setUrgencyFilter(value) {
+  urgencyFilter = value;
+  for (const button of filterButtons) button.setAttribute("aria-pressed", String(button.dataset.filter === value));
+  applyFilters();
+}
+
+for (const button of filterButtons) button.addEventListener("click", () => setUrgencyFilter(button.dataset.filter));
+search.addEventListener("input", applyFilters);
 
 function showConnection(ok) {
   if (ok) {
