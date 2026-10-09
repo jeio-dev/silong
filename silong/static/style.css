@@ -407,3 +407,50 @@ label.choice input {
   background: #fdf0e1;
   font-weight: 600;
 }
+
+/* Phone outbox queue, pending reports and confirmed references. */
+
+.queue {
+  margin-top: 1.5rem;
+  padding-top: 0.75rem;
+  border-top: 2px solid var(--border);
+}
+
+.count {
+  font-size: 1.15rem;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.warning {
+  margin: 0 0 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border-left: 6px solid var(--focus);
+  background: #fdf0e1;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.report.pending,
+.report.receipt {
+  padding: 0.6rem 0.85rem;
+}
+
+.report.unsaved {
+  border-color: var(--error-border);
+  background: var(--error-bg);
+}
+
+.report.receipt {
+  border-color: var(--success-border);
+  background: var(--success-bg);
+}
+
+.report.receipt .reference {
+  font-size: 1.5rem;
+  font-weight: 700;
+}
+
+.report.receipt .report-meta {
+  margin-top: 0.25rem;
+}
