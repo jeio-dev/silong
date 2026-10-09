@@ -16,7 +16,7 @@ Run a guided release for this project. Stop and wait for my answer at each step 
 3. Check readiness. Any failure stops the release.
    - All work in this batch is merged to main.
    - No blocking review comment is open.
-   - The gate command passes on main: npm run check
+   - The gate command from GITFLOW.md passes on main: python -m unittest discover -s tests -v
    - CI is green on the latest main commit, if CI exists (gh run list).
 
 4. Release steps
