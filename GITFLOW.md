@@ -1,21 +1,25 @@
 Follow this git workflow for this project.
 
 Branching
-- One branch per phase, named phase/NN-slug (e.g. phase/03-login). Never commit directly to main.
+- One branch per phase, named phase/NN-slug (e.g. phase/02-local-triage). Never commit directly to main.
+- Planning or docs work outside a phase goes on planning/slug or docs/slug (e.g. planning/initial-roadmap).
 
 Commits
 - One commit per verified task, made only after the task's checks pass.
 - Format: type(scope): summary (NN-TN)
-  e.g. feat(auth): validate login form (03-T2)
+  e.g. feat(worker): apply urgency rules (02-T3)
+  Commits on planning/ or docs/ branches have no task ID: type(scope): summary
 - Types: feat, fix, refactor, test, docs, chore, ci. Use feat! or fix! for breaking changes.
-- Scopes, use only these: auth, api, ui, db, deps, ci, docs
+- Scopes, use only these: api, ui, db, config, worker, deps, ci, docs
+  worker covers the queue, Ollama extraction, urgency rules and Whisper.
   If a change fits none of them, stop and ask me before adding a new scope.
 - Stage only the files this task changed. Never use git add -A or git add .
   My own uncommitted edits must stay unstaged.
-- Never commit while the gate command fails: python -m unittest discover -s tests -v
+- Never commit code or tests while the gate command fails: python -m unittest discover -s tests -v
+  Docs-only commits (no code or tests touched) are exempt.
 
 Push and PR (authorized)
-- Push the phase branch after each commit.
+- Push the branch after each commit.
 - On the first push, open a draft PR. Mark it ready for review when all tasks in the phase are done.
 - PR body, unless .github/pull_request_template.md exists:
 ```plaintext

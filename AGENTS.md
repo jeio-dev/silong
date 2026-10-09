@@ -1,4 +1,4 @@
-# AGENT.md
+# AGENTS.md
 
 Guidance for coding agents working in this repository. `CLAUDE.md` imports this file.
 
@@ -9,9 +9,9 @@ Silong is an offline evacuation-center hub. A computer at the center serves a lo
 ## Sources of truth
 
 - `PRD.md`: the agreed product. It **supersedes** `IDEA.md` wherever they conflict (IndexedDB outbox rather than `localStorage`, nullable `in_center`/`on_behalf`, outside-center rescue rule first, one extraction over text + transcript, Windows/A54-only verification).
-- `IDEA.md`: original idea; still the reference for the `reports` schema, API table, and extraction schema.
+- `IDEA.md`: original idea; still the reference for the `reports` schema and API table. Its extraction schema is the base, but use the PRD's field table, which adds `in_center` and `on_behalf`.
 - `ROADMAP.md`: phase list. Its `Current:` line links to the active phase plan under `.kaylo/phases/`.
-- `GITFLOW.md`: branching, commit, push and PR rules. `RELEASING.md`: guided release steps.
+- `GITFLOW.md`: branching, commit, push and PR rules.
 - `.kaylo/`: Kaylo planning state (plans, preferences, planning history). Update it through the Kaylo skills, not by hand.
 
 ## Current status
@@ -26,7 +26,7 @@ These come from the Phase 01 plan and do not exist until T1/T3 create them:
 - Tests in `tests/`, using standard-library `unittest`, FastAPI `TestClient` and temporary SQLite databases.
 - Setup: `python3 -m venv .venv && . .venv/bin/activate && python -m pip install -r requirements.txt`
 - Run: `python -m silong` (binds `0.0.0.0`, one process, no reload)
-- Gate: `python -m unittest discover -s tests -v`. It must pass, with tests actually discovered, before any implementation commit.
+- Gate: `python -m unittest discover -s tests -v`. It must pass, with tests actually discovered, before any commit that touches code or tests. Docs-only commits are exempt.
 
 On this Linux host only `python3` is on PATH. Run `python` commands inside the activated virtual environment.
 
@@ -50,7 +50,7 @@ Use only synthetic reports in tests, fixtures, examples and evidence. Never comm
 
 Follow `GITFLOW.md`. In short:
 
-- Work on `phase/NN-slug` branches, never directly on `main`.
-- Make one commit per verified task: `type(scope): summary (NN-TN)`, using only the listed scopes. Ask before adding a scope.
-- Stage files by name. Never use `git add -A` or `git add .`. The user's untracked documents (`IDEA.md`, `PRD.md`, `GITFLOW.md`, `RELEASING.md`, `CLAUDE.md`, this file) stay unstaged unless the user assigns them to a commit.
+- Work on `phase/NN-slug` branches, never directly on `main`. Planning or docs work outside a phase uses `planning/slug` or `docs/slug`.
+- Make one commit per verified task: `type(scope): summary (NN-TN)`, using only the listed scopes (`api`, `ui`, `db`, `config`, `worker`, `deps`, `ci`, `docs`). Ask before adding a scope. Commits on planning/docs branches omit the task ID.
+- Stage files by name. Never use `git add -A` or `git add .`. Don't modify or stage the user's documents (`IDEA.md`, `PRD.md`, `GITFLOW.md`, `CLAUDE.md`, `AGENTS.md`) unless the user assigns the change to a task.
 - Ask first before merging to `main`, tagging, releasing, force-pushing, rewriting pushed history, deleting branches, or opening issues.
