@@ -112,14 +112,18 @@ async function main() {
 
     // Delivery control: route POST /api/reports through a mode switch. The same
     // handler is installed on every page so two tabs share one control point.
-    let mode = "pass"; // pass | hold | abort | fail503 | fail422 | malformed | commitThen500
+    // zeroId | negativeId | errorWithId reply with an id that is not a valid
+    // confirmation (zero, negative, or on an error status).
+    let mode = "pass"; // pass | hold | abort | fail503 | fail422 | malformed | commitThen500 | zeroId | negativeId | errorWithId
     let postCount = 0;
     let commitThen500Left = 0;
     const held = [];
+    const postIds = []; // client_id of every POST, in order
     function installRoutes(pg) {
       return pg.route("**/api/reports", async (route) => {
         if (route.request().method() !== "POST") return route.continue();
         postCount += 1;
+        postIds.push(uuidFromPostData(route.request().postData()));
         if (mode === "hold") {
           held.push(route);
           return;
@@ -131,6 +135,12 @@ async function main() {
           return route.fulfill({ status: 422, contentType: "application/json", body: '{"detail":"bad report"}' });
         if (mode === "malformed")
           return route.fulfill({ status: 200, contentType: "application/json", body: "not-json" });
+        if (mode === "zeroId")
+          return route.fulfill({ status: 200, contentType: "application/json", body: '{"id":0}' });
+        if (mode === "negativeId")
+          return route.fulfill({ status: 200, contentType: "application/json", body: '{"id":-5}' });
+        if (mode === "errorWithId")
+          return route.fulfill({ status: 503, contentType: "application/json", body: '{"id":123,"detail":"hub busy"}' });
         if (mode === "commitThen500" && commitThen500Left > 0) {
           commitThen500Left -= 1;
           await route.fetch(); // the hub commits; the response is then lost
@@ -140,11 +150,12 @@ async function main() {
       });
     }
 
-    const contextPage = async () => {
+    const contextPage = async (setup) => {
       const page = await context.newPage();
       page.on("pageerror", (error) => pageErrors.push(error.message));
       page.on("request", (request) => seenUrls.push(request.url()));
       await installRoutes(page);
+      if (setup) await setup(page);
       await page.goto(origin + "/");
       await page.waitForFunction(() => typeof window.Outbox !== "undefined");
       return page;
@@ -164,6 +175,22 @@ async function main() {
 
     async function pendingClientIds() {
       return page.evaluate(() => window.Outbox.listPending().then((rows) => rows.map((row) => row.client_id)));
+    }
+
+    async function waitFor(check, what, timeout = 12000) {
+      const deadline = Date.now() + timeout;
+      while (!check()) {
+        if (Date.now() > deadline) throw new Error("timed out waiting for " + what);
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+    }
+
+    async function storedReceiptIds(pg = page) {
+      return pg.evaluate(() => window.Outbox.listReceipts().then((rows) => rows.map((row) => row.id)));
+    }
+
+    async function receivedTotal(pg = page) {
+      return Number((await pg.locator("#received-count").textContent()).replace(/\D/g, ""));
     }
 
     // --- 1. save-before-send: the row is durable while the send is held. ---
@@ -311,7 +338,148 @@ async function main() {
     const diaperCount = dbQuery(db, "SELECT COUNT(*) FROM reports WHERE raw_text LIKE '%diaper%'")[0][0];
     assert.strictEqual(diaperCount, 1, "safe resend did not duplicate the report");
 
-    // --- layout, labels, tap targets, safe requests ---
+    // --- 8. R1: an id is a confirmation only on success and only when positive. ---
+    postCount = 0;
+    mode = "zeroId";
+    await submit("R1 synthetic: may tumutulo sa bubong ng Room 7.");
+    await waitFor(() => postCount >= 1, "zero-id reply");
+    await waitText(page, "#pending-list", "did not return a reference");
+    mode = "errorWithId";
+    await page.click("#retry-now");
+    await waitText(page, "#pending-list", "hub busy");
+    mode = "negativeId";
+    await page.click("#retry-now");
+    await waitText(page, "#pending-list", "did not return a reference");
+    assert.strictEqual(await page.locator("#pending-count").textContent(), "(1)", "invalid replies keep the report pending");
+    assert.strictEqual((await pendingClientIds()).length, 1, "invalid replies keep the durable payload");
+    let received = await page.locator("#received-list").textContent();
+    for (const bad of ["Reference #0", "Reference #-5", "Reference #123"]) {
+      assert.ok(!received.includes(bad), "no false reference: " + bad);
+    }
+    let stored = await storedReceiptIds();
+    assert.ok(!stored.some((id) => id <= 0 || id === 123), "no false reference stored: " + stored.join(","));
+    assert.ok(!(await page.locator("#feedback").textContent()).includes("Received by the hub"));
+    mode = "pass";
+    await page.waitForFunction(() => document.querySelector("#pending-count").textContent === "(0)", null, { timeout: 20000 });
+    assert.strictEqual(dbQuery(db, "SELECT COUNT(*) FROM reports WHERE raw_text LIKE 'R1 synthetic:%'")[0][0], 1);
+
+    // R1 on the storage-failure path: the immediate send and the manual retry.
+    await page.evaluate(() => {
+      const original = window.Outbox.save;
+      let left = 2;
+      window.Outbox.save = function failTwice(record) {
+        if (left <= 0) return original(record);
+        left -= 1;
+        if (left === 0) window.Outbox.save = original;
+        return Promise.reject(new Error("QuotaExceededError"));
+      };
+    });
+    mode = "errorWithId";
+    await submit("R1 synthetic fallback: walang tubig sa Room 8.");
+    await waitText(page, "#feedback", "Not saved on this phone", 10000);
+    mode = "zeroId";
+    await page.click("#pending-list button");
+    await waitText(page, "#feedback", "Still not saved or confirmed", 10000);
+    await waitText(page, "#pending-list", "Not saved on this phone");
+    received = await page.locator("#received-list").textContent();
+    assert.ok(!received.includes("Reference #0") && !received.includes("Reference #123"), "fallback recorded no false reference");
+    stored = await storedReceiptIds();
+    assert.ok(!stored.some((id) => id <= 0 || id === 123), "fallback stored no false reference");
+    assert.ok(await page.locator("#text").getAttribute("readonly") !== null, "unsaved report stays frozen");
+    mode = "pass";
+    await page.click("#pending-list button"); // save works again: becomes a durable report
+    await waitText(page, "#feedback", "Received by the hub", 15000);
+    await page.waitForFunction(() => document.querySelector("#pending-count").textContent === "(0)", null, { timeout: 15000 });
+    assert.strictEqual(dbQuery(db, "SELECT COUNT(*) FROM reports WHERE raw_text LIKE 'R1 synthetic fallback:%'")[0][0], 1);
+
+    // --- 9. R2: repeated submission during a held save is one report and one UUID. ---
+    await page.evaluate(() => {
+      const original = window.Outbox.save;
+      window.__saveCalls = 0;
+      window.Outbox.save = function heldSave(record) {
+        window.__saveCalls += 1;
+        window.Outbox.save = original;
+        return new Promise((resolve) => (window.__releaseSave = resolve)).then(() => original(record));
+      };
+    });
+    const r2Start = postIds.length;
+    await page.fill("#text", "R2 synthetic: dalawang beses pinindot, isang ulat lang.");
+    await page.evaluate(() => {
+      const form = document.getElementById("report-form");
+      form.requestSubmit();
+      form.requestSubmit();
+      document.getElementById("send").click();
+    });
+    await waitText(page, "#feedback", "Saving");
+    assert.strictEqual(await page.evaluate(() => window.__saveCalls), 1, "one save for repeated taps");
+    assert.ok(await page.evaluate(() => document.getElementById("send").disabled), "send is locked while saving");
+    await page.focus("#text");
+    await page.keyboard.type(" extra");
+    assert.strictEqual(
+      await page.inputValue("#text"),
+      "R2 synthetic: dalawang beses pinindot, isang ulat lang.",
+      "the submitted snapshot cannot be edited while its save settles"
+    );
+    await page.evaluate(() => window.__releaseSave());
+    await waitText(page, "#feedback", "Received by the hub", 15000);
+    assert.strictEqual(await page.inputValue("#text"), "", "submitted text is cleared after its save");
+    assert.ok(await page.evaluate(() => !document.getElementById("send").disabled && !document.getElementById("text").readOnly));
+    assert.strictEqual(new Set(postIds.slice(r2Start)).size, 1, "one UUID was sent for the repeated taps");
+    assert.strictEqual(dbQuery(db, "SELECT COUNT(*) FROM reports WHERE raw_text LIKE 'R2 synthetic:%'")[0][0], 1);
+
+    // A draft typed while a background send is held survives its receipt.
+    mode = "hold";
+    await submit("R2 synthetic background: kailangan ng kumot sa Room 10.");
+    await waitText(page, "#feedback", "Saved on this phone; waiting to send");
+    await waitFor(() => held.length >= 1, "held background send");
+    await page.fill("#text", "R2 draft in progress");
+    await page.focus("#text");
+    mode = "pass";
+    await releaseHeld();
+    await waitText(page, "#feedback", "Received by the hub", 15000);
+    assert.strictEqual(await page.inputValue("#text"), "R2 draft in progress", "draft kept across the receipt");
+    assert.strictEqual(await page.evaluate(() => document.activeElement.id), "text", "focus kept across the receipt");
+    await page.fill("#text", "");
+
+    // --- 10. R3: confirmation replaces only its own submission's feedback. ---
+    mode = "hold";
+    await submit("R3 synthetic A: may lagnat ang bata sa Room 11.");
+    await waitFor(() => held.length >= 1, "held send A");
+    await submit("R3 synthetic B: walang ilaw sa Room 12.");
+    await waitText(page, "#feedback", "Saved on this phone; waiting to send");
+    const beforeA = await receivedTotal();
+    await held.shift().continue(); // A is confirmed; B is still waiting
+    await page.waitForFunction(
+      (want) => Number(document.querySelector("#received-count").textContent.replace(/\D/g, "")) === want,
+      beforeA + 1,
+      { timeout: 10000 }
+    );
+    let feedbackText = await page.locator("#feedback").textContent();
+    assert.ok(feedbackText.includes("waiting to send"), "A's receipt does not overwrite B's feedback: " + feedbackText);
+    await waitFor(() => held.length >= 1, "held send B");
+    mode = "pass";
+    await releaseHeld();
+    await waitText(page, "#feedback", "Received by the hub", 15000);
+    const idB = dbQuery(db, "SELECT id FROM reports WHERE raw_text LIKE 'R3 synthetic B:%'")[0][0];
+    assert.ok((await page.locator("#feedback").textContent()).includes("Reference #" + idB), "feedback shows B's reference");
+
+    mode = "hold";
+    await submit("R3 synthetic C: kailangan ng tubig sa Room 13.");
+    await waitFor(() => held.length >= 1, "held send C");
+    await page.click("#send"); // blank: a newer validation message
+    await waitText(page, "#feedback", "Please write what is happening");
+    const beforeC = await receivedTotal();
+    mode = "pass";
+    await releaseHeld();
+    await page.waitForFunction(
+      (want) => Number(document.querySelector("#received-count").textContent.replace(/\D/g, "")) === want,
+      beforeC + 1,
+      { timeout: 10000 }
+    );
+    feedbackText = await page.locator("#feedback").textContent();
+    assert.ok(feedbackText.includes("Please write what is happening"), "a background receipt keeps the newer message");
+
+    // --- layout, labels, tap targets ---
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
     assert.strictEqual(overflow, false, "no horizontal overflow at 412x915");
     for (const selector of ["#send", "#retry-now", "#new-report"]) {
@@ -326,6 +494,62 @@ async function main() {
     }
     assert.ok(await page.evaluate(() => Boolean(document.querySelector('label[for="reporter"]'))));
     assert.ok(await page.evaluate(() => Boolean(document.querySelector('label[for="text"]'))));
+
+    // --- 11. R4: stored references recover after a failed read, merged with known ones. ---
+    const seedCid = "00000000-0000-4000-8000-000000000027";
+    await page.evaluate((cid) => window.Outbox.acknowledge(cid, 27), seedCid);
+    await page.close(); // page3 is the only sender from here on
+    const instrument = `
+window.__failReceipts = true;
+window.__failAck = false;
+(() => {
+  const listReceipts = Outbox.listReceipts;
+  const acknowledge = Outbox.acknowledge;
+  Outbox.listReceipts = () => (window.__failReceipts ? Promise.reject(new Error("read failed")) : listReceipts());
+  Outbox.acknowledge = (clientId, id) =>
+    window.__failAck ? Promise.reject(new Error("QuotaExceededError")) : acknowledge(clientId, id);
+})();`;
+    const page3 = await contextPage((pg) =>
+      pg.route("**/static/outbox.js", async (route) => {
+        const response = await route.fetch();
+        return route.fulfill({ response, body: (await response.text()) + "\n" + instrument });
+      })
+    );
+    await waitText(page3, "#received-count", "unavailable");
+    await waitText(page3, "#storage-note", "References received earlier could not be read");
+    await page3.evaluate(() => (window.__failAck = true));
+    await page3.fill("#text", "R4 synthetic: kailangan ng gamot sa Room 14.");
+    await page3.click("#send");
+    await waitText(page3, "#feedback", "Received by the hub", 15000);
+    await waitText(page3, "#storage-note", "could not record the reference");
+    assert.strictEqual(await page3.locator("#received-count").textContent(), "unavailable", "count stays unknown while reads fail");
+    const idR4 = dbQuery(db, "SELECT id FROM reports WHERE raw_text LIKE 'R4 synthetic:%'")[0][0];
+
+    await page3.evaluate(() => (window.__failReceipts = false)); // storage reads recover
+    await waitText(page3, "#received-list", "Reference #27", 8000);
+    const storedTotal = (await storedReceiptIds(page3)).length;
+    await page3.waitForFunction(
+      (want) => document.querySelector("#received-count").textContent === want,
+      "(" + (storedTotal + 1) + ")",
+      { timeout: 8000 }
+    );
+    received = await page3.locator("#received-list").textContent();
+    assert.ok(received.includes("Reference #" + idR4) && received.includes("may send again"), "known unrecorded reference kept");
+    const note = await page3.locator("#storage-note").textContent();
+    assert.ok(!note.includes("References received earlier"), "read warning cleared after recovery: " + note);
+
+    await page3.evaluate(() => (window.__failAck = false));
+    await page3.waitForFunction(() => document.querySelector("#pending-count").textContent === "(0)", null, { timeout: 15000 });
+    await page3.waitForFunction(() => document.querySelector("#storage-note").hidden, null, { timeout: 8000 });
+    assert.strictEqual(dbQuery(db, "SELECT COUNT(*) FROM reports WHERE raw_text LIKE 'R4 synthetic:%'")[0][0], 1);
+
+    // Another tab's acknowledgement appears without a reload.
+    const page4 = await contextPage();
+    await page4.evaluate(() => window.Outbox.acknowledge("00000000-0000-4000-8000-000000000028", 28));
+    await page4.close();
+    await waitText(page3, "#received-list", "Reference #28", 8000);
+
+    // --- safe rendering and requests across every page ---
     assert.strictEqual(pageErrors.length, 0, "no page errors: " + pageErrors.join(" | "));
     for (const url of seenUrls) {
       assert.ok(url.startsWith(origin), "only local hub requests: " + url);

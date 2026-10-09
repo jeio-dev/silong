@@ -33,9 +33,12 @@ let unsavedItems = []; // { client_id, text, reporter, queued_at } whose save fa
 let receipts = []; // { client_id, id, confirmed_at, unrecorded }
 let rowErrors = new Map(); // client_id -> last failure message
 let readFailed = false; // a durable read failed; pending count is unavailable
+let receiptsReadFailed = false; // stored references could not be read; count is unavailable
 let passInFlight = false;
 let passTimer = null;
 let frozenFor = null; // client_id currently frozen into the form, or null
+let saving = false; // a submission's durable save has not settled yet
+let feedbackFor = null; // client_id whose submission the feedback describes, or null
 
 // One sender per tab: every request is serialized through this chain.
 let chain = Promise.resolve();
@@ -62,7 +65,10 @@ function element(tag, className, text) {
   return node;
 }
 
-function showFeedback(kind, lines) {
+// `owner` ties the message to one submission so that only that report's
+// later confirmation replaces it; any other message clears the tie.
+function showFeedback(kind, lines, owner = null) {
+  feedbackFor = owner;
   feedback.className = "feedback " + kind;
   feedback.replaceChildren();
   for (const line of lines) {
@@ -90,15 +96,46 @@ function preview(text) {
   return oneLine.length > PREVIEW_CHARS ? oneLine.slice(0, PREVIEW_CHARS) + "…" : oneLine;
 }
 
-function setStorageWarning(message) {
-  storageNote.textContent = message || "";
-  if (message) {
-    storageNote.className = "warning";
-    storageNote.hidden = false;
-  } else {
-    storageNote.className = "";
-    storageNote.hidden = true;
+function showReceived(id) {
+  showFeedback("success", [
+    "Received by the hub. / Natanggap na.",
+    { text: "Reference #" + id, className: "reference" },
+    "Show this number to staff if you are asked about your report.",
+  ]);
+}
+
+// Lock the form while a submission's save settles, so one tap is one report
+// (one UUID) and nothing typed meanwhile is cleared with the submitted text.
+function setSaving(on) {
+  saving = on;
+  sendButton.disabled = on;
+  reporterInput.readOnly = on || frozenFor !== null;
+  textInput.readOnly = on || frozenFor !== null;
+}
+
+// The storage note lists every storage problem that is still current.
+function renderStorageNote() {
+  const messages = [];
+  if (readFailed) messages.push("Pending reports could not be read on this phone right now. Reports are not lost.");
+  if (receiptsReadFailed) {
+    messages.push("References received earlier could not be read on this phone right now. They are not lost.");
   }
+  if (unsavedItems.length) {
+    messages.push(
+      "A report could not be saved on this phone. It is sent once right away; if that fails there is no automatic retry."
+    );
+  }
+  const unrecorded = receipts.filter((receipt) => receipt.unrecorded);
+  if (unrecorded.length) {
+    const resent = unrecorded.some((receipt) => pendingRows.some((row) => row.client_id === receipt.client_id));
+    messages.push(
+      "The hub received a report, but this phone could not record the reference." +
+        (resent ? " The report is safe and will be sent again." : "")
+    );
+  }
+  storageNote.textContent = messages.join(" ");
+  storageNote.className = messages.length ? "warning" : "";
+  storageNote.hidden = !messages.length;
 }
 
 function upsertReceipt(clientId, id, unrecorded) {
@@ -156,7 +193,8 @@ function renderQueues() {
     receivedList.append(card);
   }
 
-  receivedCount.textContent = "(" + receipts.length + ")";
+  receivedCount.textContent = receiptsReadFailed ? "unavailable" : "(" + receipts.length + ")";
+  renderStorageNote();
 }
 
 function failureMessage(result) {
@@ -188,7 +226,8 @@ async function postReport(payload) {
       data = null;
     }
     if (data && typeof data === "object") {
-      if (Number.isInteger(data.id)) id = data.id;
+      // Only a successful reply with a positive integer reference confirms receipt.
+      if (response.ok && Number.isInteger(data.id) && data.id > 0) id = data.id;
       if (typeof data.detail === "string") detail = data.detail;
     }
   } catch (error) {
@@ -205,18 +244,14 @@ async function handleDelivered(row, result) {
     let unrecorded = false;
     try {
       await Outbox.acknowledge(row.client_id, result.id);
-      setStorageWarning(null);
     } catch (error) {
       unrecorded = true;
-      setStorageWarning(
-        "The hub received this report, but this phone could not record the reference." +
-          " The report is safe and will be sent again."
-      );
     }
     upsertReceipt(row.client_id, result.id, unrecorded);
     // With a failed acknowledgement the durable pending row is still there and
     // is resent later; only a committed acknowledgement removes it.
     if (!unrecorded) removeDurable(row.client_id);
+    if (feedbackFor === row.client_id) showReceived(result.id);
   } else {
     rowErrors.set(row.client_id, failureMessage(result));
   }
@@ -228,6 +263,29 @@ async function deliverRow(row) {
   await handleDelivered(row, result);
 }
 
+// Re-read stored references (also picks up those another tab recorded). On
+// failure keep what is known and show the count as unavailable until a read
+// works; known confirmations not yet in storage are kept either way.
+async function refreshReceipts() {
+  let stored;
+  try {
+    stored = await Outbox.listReceipts();
+  } catch (error) {
+    receiptsReadFailed = true;
+    return;
+  }
+  receiptsReadFailed = false;
+  const storedIds = new Set(stored.map((receipt) => receipt.client_id));
+  receipts = stored
+    .map((receipt) => ({
+      client_id: receipt.client_id,
+      id: receipt.id,
+      confirmed_at: receipt.confirmed_at,
+      unrecorded: false,
+    }))
+    .concat(receipts.filter((receipt) => !storedIds.has(receipt.client_id)));
+}
+
 async function runPass() {
   if (passInFlight) return;
   passInFlight = true;
@@ -236,11 +294,13 @@ async function runPass() {
     try {
       rows = await Outbox.listPending();
       readFailed = false;
-      setStorageWarning(null);
     } catch (error) {
       readFailed = true;
-      setStorageWarning("Pending reports could not be read on this phone right now. Reports are not lost.");
     }
+    await refreshReceipts();
+    // Another tab may have confirmed the report this feedback describes.
+    const confirmed = receipts.find((receipt) => receipt.client_id === feedbackFor);
+    if (confirmed) showReceived(confirmed.id);
     if (rows) {
       pendingRows = rows;
       renderQueues();
@@ -295,7 +355,6 @@ async function confirmUnsaved(payload, result) {
   clearUnsaved(payload.client_id);
   upsertReceipt(payload.client_id, result.id, unrecorded);
   renderQueues();
-  return unrecorded;
 }
 
 // A submitted report whose durable save failed: one immediate send, then no
@@ -303,19 +362,11 @@ async function confirmUnsaved(payload, result) {
 async function handleSaveFailure(payload) {
   unsavedItems.push(payload);
   setFrozen(true, payload.client_id);
-  setStorageWarning(
-    "This report could not be saved on this phone. It will be sent once now; if that fails there is no automatic retry."
-  );
   renderQueues();
   const result = await serialized(() => postReport(payload));
   if (result.id !== null) {
-    const unrecorded = await confirmUnsaved(payload, result);
-    if (!unrecorded) setStorageWarning(null);
-    showFeedback("success", [
-      "Received by the hub. / Natanggap na.",
-      { text: "Reference #" + result.id, className: "reference" },
-      "Show this number to staff if you are asked about your report.",
-    ]);
+    await confirmUnsaved(payload, result);
+    showReceived(result.id);
     textInput.focus();
   } else {
     rowErrors.set(payload.client_id, failureMessage(result));
@@ -337,7 +388,7 @@ async function retryUnsaved(item) {
     const result = await serialized(() => postReport(item));
     if (result.id !== null) {
       await confirmUnsaved(item, result);
-      showFeedback("success", ["Received by the hub. / Natanggap na.", { text: "Reference #" + result.id, className: "reference" }]);
+      showReceived(result.id);
     } else {
       rowErrors.set(item.client_id, failureMessage(result));
       showFeedback("error", ["Still not saved or confirmed. / Hindi pa rin na-save o kumpirmado."]);
@@ -348,14 +399,20 @@ async function retryUnsaved(item) {
   // Save now worked: the item becomes a normal durable pending report.
   clearUnsaved(item.client_id);
   pendingRows.push(item);
-  setStorageWarning(null);
   renderQueues();
-  showFeedback("success", ["Saved on this phone; waiting to send. / Na-save sa teleponong ito; naghihintay na maipadala."]);
+  showFeedback(
+    "success",
+    ["Saved on this phone; waiting to send. / Na-save sa teleponong ito; naghihintay na maipadala."],
+    item.client_id
+  );
   triggerPassNow();
   textInput.focus();
 }
 
 async function submitReport() {
+  // One report per submission: ignore repeats while its save settles, and a
+  // frozen unsaved report is retried with its own button, never resubmitted.
+  if (saving || frozenFor !== null) return;
   if (!textInput.value.trim()) {
     showFeedback("error", ["Please write what is happening. / Isulat kung ano ang nangyayari."]);
     textInput.focus();
@@ -367,21 +424,25 @@ async function submitReport() {
     reporter: reporterInput.value.trim() || null,
     queued_at: Date.now(),
   };
-  showFeedback("info", ["Saving… / Nagse-save…"]);
+  showFeedback("info", ["Saving… / Nagse-save…"], payload.client_id);
+  setSaving(true);
   try {
     await Outbox.save(payload);
   } catch (error) {
+    setSaving(false);
     await handleSaveFailure(payload);
     return;
   }
+  setSaving(false);
   pendingRows.push(payload);
   textInput.value = ""; // the name is kept for the next report
   rowErrors.delete(payload.client_id);
-  setStorageWarning(null);
   renderQueues();
-  showFeedback("success", [
-    "Saved on this phone; waiting to send. / Na-save sa teleponong ito; naghihintay na maipadala.",
-  ]);
+  showFeedback(
+    "success",
+    ["Saved on this phone; waiting to send. / Na-save sa teleponong ito; naghihintay na maipadala."],
+    payload.client_id
+  );
   triggerPassNow();
   textInput.focus();
 }
@@ -402,20 +463,5 @@ retryNowButton.addEventListener("click", () => {
   triggerPassNow();
 });
 
-async function init() {
-  try {
-    const stored = await Outbox.listReceipts();
-    receipts = stored.map((receipt) => ({
-      client_id: receipt.client_id,
-      id: receipt.id,
-      confirmed_at: receipt.confirmed_at,
-      unrecorded: false,
-    }));
-  } catch (error) {
-    setStorageWarning("References received earlier could not be read on this phone right now.");
-  }
-  renderQueues();
-  runPass();
-}
-
-init();
+// Each pass reads pending reports and stored references before sending.
+runPass();
