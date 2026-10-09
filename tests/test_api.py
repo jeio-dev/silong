@@ -19,7 +19,7 @@ from unittest import mock
 from fastapi.testclient import TestClient
 
 import silong.__main__ as launcher
-from silong import db
+from silong import db, rules
 from silong.app import create_app
 from silong.config import Config
 
@@ -641,6 +641,18 @@ class PageTest(ApiTestCase):
         for label in labels:
             with self.subTest(label=label):
                 self.assertNotRegex(label, r"(?i)\b(critical|high|medium|low)\b")
+
+    def test_board_edit_form_matches_the_field_rules(self):
+        script = self.client.get("/static/board.js").text
+        for name, expected in (("VULNERABLE", rules.VULNERABLE), ("NEEDS", rules.NEEDS)):
+            with self.subTest(name=name):
+                block = re.search(rf"const {name} = \[(.*?)\];", script)
+                self.assertIsNotNone(block)
+                self.assertEqual(tuple(re.findall(r'"([^"]*)"', block.group(1))), expected)
+        block = re.search(r"const BLANK_FIELDS = \{(.*?)\};", script, re.S)
+        self.assertIsNotNone(block)
+        blank = json.loads("{" + re.sub(r"(\w+):", r'"\1":', block.group(1)).rstrip().rstrip(",") + "}")
+        self.assertEqual(rules.validate_fields(blank), blank)
 
     def test_board_has_three_sections_with_unclassified_first(self):
         page = self.client.get("/board").text

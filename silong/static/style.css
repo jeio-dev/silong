@@ -332,3 +332,78 @@ button:disabled {
   background: var(--error-bg);
   font-weight: 600;
 }
+
+/* Inline edit form on board cards. */
+
+select {
+  width: 100%;
+  min-height: 44px;
+  padding: 0.5rem;
+  border: 2px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+
+.edit-form {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 2px solid var(--border);
+}
+
+.edit-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  gap: 0.5rem 1rem;
+  align-items: end;
+  margin-bottom: 0.5rem;
+}
+
+.choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 1.25rem;
+  margin: 0 0 0.5rem;
+  padding: 0.25rem 0.75rem 0.5rem;
+  border: 2px solid var(--border);
+  border-radius: 6px;
+}
+
+.choices legend {
+  font-weight: 600;
+  padding: 0 0.25rem;
+}
+
+label.choice {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 44px;
+  margin: 0;
+  font-weight: 400;
+  cursor: pointer;
+}
+
+label.choice input {
+  width: 1.5rem;
+  height: 1.5rem;
+  min-height: 0;
+  margin: 0;
+}
+
+.edit-form .edit-field {
+  margin-bottom: 0;
+}
+
+.edit-notice:empty {
+  display: none;
+}
+
+.edit-notice {
+  margin: 0 0 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border-left: 6px solid var(--focus);
+  background: #fdf0e1;
+  font-weight: 600;
+}
