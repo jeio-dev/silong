@@ -9,9 +9,12 @@ import logging
 import re
 import sqlite3
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 
 from silong import db
@@ -23,6 +26,7 @@ UUID_PATTERN = re.compile(
     r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.IGNORECASE
 )
 STORAGE_ERROR = "The hub could not save or read reports right now. Please try again."
+STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 
 def _report_view(row: dict) -> dict:
@@ -89,4 +93,13 @@ def create_app(config: Optional[Config] = None) -> FastAPI:
             raise HTTPException(503, STORAGE_ERROR)
         return [_report_view(row) for row in rows]
 
+    @app.get("/", include_in_schema=False)
+    async def report_page() -> FileResponse:
+        return FileResponse(STATIC_DIR / "index.html")
+
+    @app.get("/board", include_in_schema=False)
+    async def board_page() -> FileResponse:
+        return FileResponse(STATIC_DIR / "board.html")
+
+    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
     return app

@@ -264,6 +264,69 @@ class ListTest(ApiTestCase):
         self.assertEqual([r["id"] for r in listed], ids)
 
 
+class PageTest(ApiTestCase):
+    ASSETS = {
+        "/static/report.js": "javascript",
+        "/static/board.js": "javascript",
+        "/static/style.css": "text/css",
+    }
+
+    def test_report_form_page(self):
+        response = self.client.get("/")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("text/html", response.headers["content-type"])
+        page = response.text
+        self.assertIn('<textarea id="text" name="text"', page)
+        self.assertIn('<input id="reporter" name="reporter"', page)
+        self.assertIn('<label for="text">', page)
+        self.assertIn('<label for="reporter">', page)
+        self.assertIn('src="/static/report.js"', page)
+        self.assertIn('href="/static/style.css"', page)
+        # Audio arrives in phase 04; the form offers no audio control yet.
+        self.assertNotIn("audio", page.lower())
+        self.assertNotIn('type="file"', page)
+
+    def test_board_page(self):
+        response = self.client.get("/board")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("text/html", response.headers["content-type"])
+        self.assertIn('src="/static/board.js"', response.text)
+        self.assertIn('href="/static/style.css"', response.text)
+
+    def test_static_assets_are_served_locally(self):
+        for path, content_type in self.ASSETS.items():
+            with self.subTest(path=path):
+                response = self.client.get(path)
+                self.assertEqual(response.status_code, 200)
+                self.assertIn(content_type, response.headers["content-type"])
+
+    def test_missing_asset_and_traversal_are_not_served(self):
+        self.assertEqual(self.client.get("/static/missing.js").status_code, 404)
+        self.assertEqual(self.client.get("/static/../app.py").status_code, 404)
+        self.assertEqual(self.client.get("/static/%2e%2e/app.py").status_code, 404)
+
+    def test_pages_use_no_remote_assets_or_unsafe_rendering(self):
+        sources = {path: self.client.get(path).text for path in ("/", "/board", *self.ASSETS)}
+        for path, source in sources.items():
+            with self.subTest(path=path):
+                self.assertNotIn("http://", source)
+                self.assertNotIn("https://", source)
+                self.assertNotIn("//cdn", source)
+                self.assertNotIn("innerHTML", source)
+                self.assertNotIn("insertAdjacentHTML", source)
+                self.assertNotIn("serviceWorker", source)
+        # crypto.randomUUID needs a secure context; the hub serves plain HTTP.
+        self.assertNotIn("randomUUID(", sources["/static/report.js"])
+        self.assertIn("crypto.getRandomValues", sources["/static/report.js"])
+
+    def test_board_polls_every_two_seconds(self):
+        self.assertIn("const POLL_MS = 2000;", self.client.get("/static/board.js").text)
+
+    def test_queued_reports_are_never_labelled_low(self):
+        board = self.client.get("/static/board.js").text + self.client.get("/board").text
+        self.assertNotRegex(board, r"(?i)\blow\b")
+
+
 class StartupTest(unittest.TestCase):
     def test_startup_creates_database_and_keeps_existing_rows(self):
         with tempfile.TemporaryDirectory() as tmp:
