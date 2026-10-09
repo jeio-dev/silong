@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import socket
 import sqlite3
 import subprocess
@@ -18,7 +19,7 @@ from unittest import mock
 from fastapi.testclient import TestClient
 
 import silong.__main__ as launcher
-from silong import db
+from silong import db, rules
 from silong.app import create_app
 from silong.config import Config
 
@@ -55,8 +56,11 @@ def _running_hub(db_path, port, **extra_env):
     """Run a real `python -m silong` until it serves, then stop it on exit.
 
     The yielded object's `output` holds the server log once the block ends.
+    Inherited SILONG_MODEL and OLLAMA_HOST are dropped, so a hub only reaches
+    a model when the test passes one in `extra_env`.
     """
-    env = dict(os.environ, SILONG_PORT=str(port), SILONG_DB=str(db_path), **extra_env)
+    env = {k: v for k, v in os.environ.items() if k not in ("SILONG_MODEL", "OLLAMA_HOST")}
+    env.update(SILONG_PORT=str(port), SILONG_DB=str(db_path), **extra_env)
     proc = subprocess.Popen(
         [sys.executable, "-m", "silong"],
         cwd=REPO_ROOT,
@@ -92,9 +96,10 @@ class ApiTestCase(unittest.TestCase):
             self.addCleanup(patcher.stop)
         self.client = self.open_client()
 
-    def open_client(self):
-        config = Config(model="qwen3:4b", whisper="small", port=8000, db_path=self.path)
-        client = TestClient(create_app(config))
+    def open_client(self, model=None, **app_options):
+        """Open the app; no worker runs unless a test passes a model (with a fake `extract`)."""
+        config = Config(model=model, whisper="small", port=8000, db_path=self.path)
+        client = TestClient(create_app(config, **app_options))
         client.__enter__()
         self.addCleanup(client.__exit__, None, None, None)
         return client
@@ -308,10 +313,265 @@ class ListTest(ApiTestCase):
         self.assertEqual(report["fields"], {"headcount": 3})
         self.assertIs(report["resolved"], True)
 
-    def test_oldest_receipt_first(self):
+    def test_unclassified_reports_oldest_receipt_first(self):
         ids = [self.post(client_id=str(uuid.uuid4()), text=t).json()["id"] for t in (TEXT_A, TEXT_B)]
         listed = self.client.get("/api/reports").json()
         self.assertEqual([r["id"] for r in listed], ids)
+
+
+# Synthetic staff-entered fields for a Medium report.
+MEDIUM_FIELDS = {
+    "location": "Room 5",
+    "in_center": True,
+    "on_behalf": False,
+    "headcount": 3,
+    "vulnerable": [],
+    "injured": False,
+    "injury_note": None,
+    "needs": ["water"],
+    "summary": "Family in Room 5 needs drinking water.",
+}
+
+
+class StaffApiTestCase(ApiTestCase):
+    def new_report(self, text=TEXT_A, client=None):
+        return self.post(client, client_id=str(uuid.uuid4()), text=text).json()["id"]
+
+    def patch(self, report_id, body=None, client=None, **kwargs):
+        if body is not None:
+            kwargs["json"] = body
+        return (client or self.client).patch(f"/api/reports/{report_id}", **kwargs)
+
+    def retry(self, report_id, client=None):
+        return (client or self.client).post(f"/api/reports/{report_id}/retry")
+
+    def listed(self, report_id, client=None):
+        return next(r for r in (client or self.client).get("/api/reports").json() if r["id"] == report_id)
+
+    def set_columns(self, report_id, **columns):
+        assignments = ", ".join(f"{name} = ?" for name in columns)
+        with closing(sqlite3.connect(self.path)) as conn, conn:
+            conn.execute(f"UPDATE reports SET {assignments} WHERE id = ?", (*columns.values(), report_id))
+
+    def assertProblem(self, response, status, *phrases):
+        self.assertEqual(response.status_code, status, response.text)
+        detail = response.json()["detail"]
+        self.assertIsInstance(detail, str)
+        for phrase in phrases:
+            self.assertIn(phrase, detail)
+
+
+class StaffEditTest(StaffApiTestCase):
+    def test_edit_recomputes_urgency_and_marks_edited_and_done(self):
+        report_id = self.new_report()
+
+        medium = self.patch(report_id, {"fields": MEDIUM_FIELDS})
+        self.assertEqual(medium.status_code, 200, medium.text)
+        view = medium.json()
+        self.assertEqual((view["urgency"], view["urgency_reason"]), ("medium", "Medium: needs water"))
+        self.assertEqual((view["status"], view["edited"], view["error"]), ("done", True, None))
+        self.assertEqual(view["fields"], MEDIUM_FIELDS)
+        self.assertEqual(view["raw_text"], TEXT_A)
+
+        injured = self.patch(report_id, {"fields": dict(MEDIUM_FIELDS, injured=True)}).json()
+        self.assertEqual(
+            (injured["urgency"], injured["urgency_reason"]), ("critical", "Critical: injury reported")
+        )
+
+        rescue = dict(MEDIUM_FIELDS, needs=["rescue"])
+        inside = self.patch(report_id, {"fields": rescue}).json()
+        self.assertEqual(inside["urgency_reason"], "Critical: rescue needed")
+        outside = self.patch(report_id, {"fields": dict(rescue, in_center=False)}).json()
+        self.assertEqual(
+            (outside["urgency"], outside["urgency_reason"]),
+            ("critical", "Critical: rescue needed outside center"),
+        )
+        self.assertEqual(self.listed(report_id), outside)
+
+    def test_edit_stores_cleaned_fields(self):
+        report_id = self.new_report()
+        messy = dict(MEDIUM_FIELDS, location="  ", summary=None, needs=["water", "food", "water"])
+        view = self.patch(report_id, {"fields": messy}).json()
+        self.assertEqual(
+            (view["fields"]["location"], view["fields"]["summary"], view["fields"]["needs"]),
+            (None, "", ["food", "water"]),
+        )
+
+    def test_edit_survives_app_restart(self):
+        report_id = self.new_report()
+        saved = self.patch(report_id, {"fields": dict(MEDIUM_FIELDS, injured=True)}).json()
+        self.client.__exit__(None, None, None)
+
+        client = self.open_client()
+        self.assertEqual(self.listed(report_id, client), saved)
+
+    def test_failed_or_queued_report_can_be_completed_by_hand(self):
+        failed = self.new_report(TEXT_A)
+        self.set_columns(failed, status="failed", error="Ollama is not reachable")
+        queued = self.new_report(TEXT_B)
+
+        for report_id in (failed, queued):
+            with self.subTest(report_id=report_id):
+                view = self.patch(report_id, {"fields": MEDIUM_FIELDS}).json()
+                self.assertEqual(
+                    (view["status"], view["error"], view["edited"], view["urgency"]),
+                    ("done", None, True, "medium"),
+                )
+        self.assertEqual(self.retry(failed).status_code, 409)
+
+    def test_fields_and_resolved_together(self):
+        report_id = self.new_report()
+        view = self.patch(report_id, {"fields": MEDIUM_FIELDS, "resolved": True}).json()
+        self.assertEqual((view["urgency"], view["resolved"]), ("medium", True))
+
+
+class ResolveTest(StaffApiTestCase):
+    def test_resolve_and_reopen_persist_and_move_between_sections(self):
+        older = self.new_report(TEXT_A)
+        newer = self.new_report(TEXT_B)
+        for report_id in (older, newer):
+            self.patch(report_id, {"fields": MEDIUM_FIELDS})
+
+        resolved = self.patch(older, {"resolved": True})
+        self.assertEqual(resolved.status_code, 200, resolved.text)
+        self.assertIs(resolved.json()["resolved"], True)
+        self.assertEqual(resolved.json()["urgency"], "medium")
+        self.client.__exit__(None, None, None)
+
+        client = self.open_client()
+        listed = client.get("/api/reports").json()
+        self.assertEqual([(r["id"], r["resolved"]) for r in listed], [(newer, False), (older, True)])
+
+        reopened = self.patch(older, {"resolved": False}, client=client).json()
+        self.assertIs(reopened["resolved"], False)
+        self.assertEqual([r["id"] for r in client.get("/api/reports").json()], [older, newer])
+
+    def test_any_report_can_be_resolved(self):
+        report_id = self.new_report()
+        self.set_columns(report_id, status="failed", error="Model reply did not match")
+        view = self.patch(report_id, {"resolved": True}).json()
+        self.assertEqual((view["resolved"], view["status"], view["edited"]), (True, "failed", False))
+
+
+class RetryTest(StaffApiTestCase):
+    def test_retry_requeues_failed_report_and_clears_error(self):
+        report_id = self.new_report()
+        self.set_columns(report_id, status="failed", error="Ollama is not reachable")
+
+        response = self.retry(report_id)
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual((response.json()["status"], response.json()["error"]), ("queued", None))
+        self.assertEqual(self.listed(report_id), response.json())
+
+    def test_retry_of_other_states_is_409_and_changes_nothing(self):
+        for status in ("queued", "extracting", "done"):
+            with self.subTest(status=status):
+                report_id = self.new_report()
+                self.set_columns(report_id, status=status)
+                before = self.listed(report_id)
+                self.assertProblem(self.retry(report_id), 409, "Only a failed report", status)
+                self.assertEqual(self.listed(report_id), before)
+
+
+class StaffValidationTest(StaffApiTestCase):
+    def test_invalid_bodies_are_422_with_a_string_detail(self):
+        report_id = self.new_report()
+        over_limit = " ".join(["salita"] * 21)
+        missing = {k: v for k, v in MEDIUM_FIELDS.items() if k != "summary"}
+        cases = [
+            ("not JSON", {"content": b"resolved=true"}, "JSON object"),
+            ("empty body", {"content": b""}, "JSON object"),
+            ("empty object", {"body": {}}, "JSON object"),
+            ("list", {"body": [MEDIUM_FIELDS]}, "JSON object"),
+            ("unknown key", {"body": {"urgency": "low"}}, "urgency"),
+            ("resolved not bool", {"body": {"resolved": "yes"}}, "resolved"),
+            ("fields not object", {"body": {"fields": None}}, "fields must be an object"),
+            ("missing field", {"body": {"fields": missing}}, "summary"),
+            ("extra field", {"body": {"fields": dict(MEDIUM_FIELDS, urgency="low")}}, "urgency"),
+            ("headcount text", {"body": {"fields": dict(MEDIUM_FIELDS, headcount="3")}}, "headcount"),
+            ("negative headcount", {"body": {"fields": dict(MEDIUM_FIELDS, headcount=-1)}}, "headcount"),
+            ("bad need", {"body": {"fields": dict(MEDIUM_FIELDS, needs=["boat"])}}, "needs"),
+            ("in_center text", {"body": {"fields": dict(MEDIUM_FIELDS, in_center="no")}}, "in_center"),
+            ("long summary", {"body": {"fields": dict(MEDIUM_FIELDS, summary=over_limit)}}, "20 words"),
+        ]
+        before = self.listed(report_id)
+        for name, request, phrase in cases:
+            with self.subTest(name):
+                body = request.pop("body", None)
+                self.assertProblem(self.patch(report_id, body, **request), 422, phrase)
+                request["body"] = body
+        self.assertEqual(self.listed(report_id), before)
+
+    def test_unknown_id_is_404(self):
+        self.new_report()
+        for path in ("999", "0", "-1", "99999999999999999999", "-9223372036854775809"):
+            with self.subTest(path=path):
+                self.assertProblem(self.patch(path, {"resolved": True}), 404, "No report")
+                self.assertProblem(self.patch(path, {"fields": MEDIUM_FIELDS}), 404, "No report")
+                self.assertProblem(self.retry(path), 404, "No report")
+
+    def test_storage_error_is_503_and_changes_nothing(self):
+        report_id = self.new_report()
+        self.set_columns(report_id, status="failed", error="Ollama is not reachable")
+        before = self.listed(report_id)
+        with closing(sqlite3.connect(self.path)) as conn:
+            conn.execute(
+                "CREATE TRIGGER fail_update BEFORE UPDATE ON reports"
+                " BEGIN SELECT RAISE(ABORT, 'disk unavailable'); END"
+            )
+        for name, send in (
+            ("fields", lambda: self.patch(report_id, {"fields": MEDIUM_FIELDS})),
+            ("resolved", lambda: self.patch(report_id, {"resolved": True})),
+            ("retry", lambda: self.retry(report_id)),
+        ):
+            with self.subTest(name):
+                with self.assertLogs("silong.app", "ERROR"):
+                    self.assertProblem(send(), 503, "try again")
+        self.assertEqual(self.listed(report_id), before)
+
+
+class BoardOrderTest(StaffApiTestCase):
+    def test_list_order_follows_urgency_then_unclassified_then_resolved(self):
+        def classify(report_id, resolved=None, **changes):
+            body = {"fields": dict(MEDIUM_FIELDS, **changes)}
+            if resolved is not None:
+                body["resolved"] = resolved
+            self.assertEqual(self.patch(report_id, body).status_code, 200)
+
+        low = self.new_report()
+        classify(low, needs=[])
+        unclassified_old = self.new_report()
+        critical_old = self.new_report()
+        classify(critical_old, needs=["rescue"])
+        high = self.new_report()
+        classify(high, vulnerable=["infant"], needs=["milk_formula"])
+        medium = self.new_report()
+        classify(medium)
+        critical_new = self.new_report()
+        classify(critical_new, injured=True)
+        resolved_old = self.new_report()
+        classify(resolved_old, resolved=True, needs=["rescue"])
+        unclassified_new = self.new_report()
+        resolved_new = self.new_report()
+        self.assertEqual(self.patch(resolved_new, {"resolved": True}).status_code, 200)
+
+        listed = self.client.get("/api/reports").json()
+
+        self.assertEqual(
+            [r["id"] for r in listed],
+            [
+                critical_old,
+                critical_new,
+                high,
+                medium,
+                low,
+                unclassified_old,
+                unclassified_new,
+                resolved_new,
+                resolved_old,
+            ],
+        )
 
 
 class PageTest(ApiTestCase):
@@ -372,9 +632,34 @@ class PageTest(ApiTestCase):
     def test_board_polls_every_two_seconds(self):
         self.assertIn("const POLL_MS = 2000;", self.client.get("/static/board.js").text)
 
-    def test_queued_reports_are_never_labelled_low(self):
-        board = self.client.get("/static/board.js").text + self.client.get("/board").text
-        self.assertNotRegex(board, r"(?i)\blow\b")
+    def test_unclassified_status_labels_carry_no_urgency_word(self):
+        script = self.client.get("/static/board.js").text
+        block = re.search(r"const STATUS_LABELS = \{(.*?)\};", script, re.S)
+        self.assertIsNotNone(block)
+        labels = re.findall(r'"([^"]*)"', block.group(1))
+        self.assertEqual(len(labels), 3)
+        for label in labels:
+            with self.subTest(label=label):
+                self.assertNotRegex(label, r"(?i)\b(critical|high|medium|low)\b")
+
+    def test_board_edit_form_matches_the_field_rules(self):
+        script = self.client.get("/static/board.js").text
+        for name, expected in (("VULNERABLE", rules.VULNERABLE), ("NEEDS", rules.NEEDS)):
+            with self.subTest(name=name):
+                block = re.search(rf"const {name} = \[(.*?)\];", script)
+                self.assertIsNotNone(block)
+                self.assertEqual(tuple(re.findall(r'"([^"]*)"', block.group(1))), expected)
+        block = re.search(r"const BLANK_FIELDS = \{(.*?)\};", script, re.S)
+        self.assertIsNotNone(block)
+        blank = json.loads("{" + re.sub(r"(\w+):", r'"\1":', block.group(1)).rstrip().rstrip(",") + "}")
+        self.assertEqual(rules.validate_fields(blank), blank)
+
+    def test_board_has_three_sections_with_unclassified_first(self):
+        page = self.client.get("/board").text
+        positions = [page.find(f'<ol id="{name}"') for name in ("unclassified", "triaged", "resolved")]
+        self.assertNotIn(-1, positions)
+        self.assertEqual(positions, sorted(positions))
+        self.assertRegex(page, r'<details class="resolved-section">\s*<summary>')
 
 
 class StartupTest(unittest.TestCase):

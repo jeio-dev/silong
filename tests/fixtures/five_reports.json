@@ -1,0 +1,100 @@
+{
+  "note": "Synthetic Taglish reports for the five-report model test (python -m silong.bench) and tests/test_bench.py. Not real people or places. Do not reuse the few-shot examples in silong/extract.py here.",
+  "reports": [
+    {
+      "id": "outside-rescue-for-others",
+      "text": "Paki-rescue po yung pamilya sa tapat ng bahay namin sa Sitio Malinis, Brgy. Bagong Silang. Apat sila nasa second floor, may buntis. Hanggang dibdib na ang baha.",
+      "expected": {
+        "fields": {
+          "location": "Sitio Malinis, Brgy. Bagong Silang",
+          "in_center": false,
+          "on_behalf": true,
+          "headcount": 4,
+          "vulnerable": ["pregnant"],
+          "injured": false,
+          "injury_note": null,
+          "needs": ["rescue"],
+          "summary": "A family of four including a pregnant woman is trapped on a second floor by chest-high flood."
+        },
+        "urgency": "critical",
+        "reason": "Critical: rescue needed outside center"
+      }
+    },
+    {
+      "id": "injury-in-center",
+      "text": "Nandito kami sa Gym ng evacuation center. Dalawa kaming nahiwa sa yero habang naglilinis, dumudugo pa yung kamay ko.",
+      "expected": {
+        "fields": {
+          "location": "Gym, evacuation center",
+          "in_center": true,
+          "on_behalf": false,
+          "headcount": 2,
+          "vulnerable": [],
+          "injured": true,
+          "injury_note": "cuts from metal sheet, hand still bleeding",
+          "needs": [],
+          "summary": "Two people in the gym were cut by metal sheeting while cleaning; one hand is still bleeding."
+        },
+        "urgency": "critical",
+        "reason": "Critical: injury reported"
+      }
+    },
+    {
+      "id": "vulnerable-supply-need",
+      "text": "Sa Room 7 po ng evacuation center, tatlo kami dito. Yung lolo namin 80 years old, ubos na yung maintenance na gamot niya para sa high blood.",
+      "expected": {
+        "fields": {
+          "location": "Room 7, evacuation center",
+          "in_center": true,
+          "on_behalf": true,
+          "headcount": 3,
+          "vulnerable": ["senior"],
+          "injured": false,
+          "injury_note": null,
+          "needs": ["medicine"],
+          "summary": "Family of three in Room 7; their 80-year-old grandfather has run out of blood pressure medicine."
+        },
+        "urgency": "high",
+        "reason": "High: senior + medicine"
+      }
+    },
+    {
+      "id": "other-need",
+      "text": "Taga-covered court po kami sa evacuation center, walo kami dito. Kulang na po ang kumot at banig, malamig na sa gabi.",
+      "expected": {
+        "fields": {
+          "location": "covered court, evacuation center",
+          "in_center": true,
+          "on_behalf": false,
+          "headcount": 8,
+          "vulnerable": [],
+          "injured": false,
+          "injury_note": null,
+          "needs": ["other"],
+          "summary": "Eight people at the covered court need more blankets and sleeping mats; nights are cold."
+        },
+        "urgency": "medium",
+        "reason": "Medium: needs other"
+      }
+    },
+    {
+      "id": "no-need",
+      "text": "Update lang po: nakarating na kami ng pamilya ko dito sa evacuation center, nasa Room 2 kami. Okay naman kami lahat, salamat po.",
+      "expected": {
+        "fields": {
+          "location": "Room 2, evacuation center",
+          "in_center": true,
+          "on_behalf": false,
+          "headcount": null,
+          "vulnerable": [],
+          "injured": false,
+          "injury_note": null,
+          "needs": [],
+          "summary": "Reporter's family arrived safely at the evacuation center and is in Room 2; all are okay."
+        },
+        "urgency": "low",
+        "reason": "Low: no need stated"
+      }
+    }
+  ]
+}

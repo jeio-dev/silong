@@ -230,3 +230,180 @@ button:disabled {
   color: var(--muted);
   overflow-wrap: anywhere;
 }
+
+/* Board sections, urgency bands and card details. Urgency is always shown in
+   words; the color band only reinforces it. */
+
+:root {
+  --critical: #b3261e;
+  --high: #a34a00;
+  --medium: #6f5600;
+  --low: #4a5866;
+}
+
+.report.urgency-critical { border-left: 12px solid var(--critical); }
+.report.urgency-high { border-left: 12px solid var(--high); }
+.report.urgency-medium { border-left: 12px solid var(--medium); }
+.report.urgency-low { border-left: 12px solid var(--low); }
+
+.urgency-label {
+  padding: 0.1rem 0.6rem;
+  border-radius: 4px;
+  background: var(--low);
+  color: #ffffff;
+  font-size: 1.35rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.urgency-critical .urgency-label { background: var(--critical); }
+.urgency-high .urgency-label { background: var(--high); }
+.urgency-medium .urgency-label { background: var(--medium); }
+
+.reason {
+  font-size: 1.25rem;
+  font-weight: 600;
+}
+
+.fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: 0.25rem 1.5rem;
+  margin: 0.5rem 0;
+}
+
+.field-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 0.4rem;
+}
+
+.field-row dt {
+  font-weight: 600;
+}
+
+.field-row dt::after {
+  content: ":";
+}
+
+.field-row dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.report-notes {
+  margin: 0.25rem 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.original summary,
+.resolved-section > summary {
+  min-height: 44px;
+  padding: 0.5rem 0;
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.resolved-section > summary h2 {
+  display: inline;
+  color: var(--text);
+}
+
+.report .actions {
+  margin-top: 0.5rem;
+}
+
+.card-feedback:empty {
+  display: none;
+}
+
+.card-feedback {
+  margin: 0.5rem 0 0;
+  font-size: 1rem;
+}
+
+.card-feedback.error {
+  padding: 0.5rem 0.75rem;
+  border-left: 6px solid var(--error-border);
+  background: var(--error-bg);
+  font-weight: 600;
+}
+
+/* Inline edit form on board cards. */
+
+select {
+  width: 100%;
+  min-height: 44px;
+  padding: 0.5rem;
+  border: 2px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+
+.edit-form {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 2px solid var(--border);
+}
+
+.edit-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  gap: 0.5rem 1rem;
+  align-items: end;
+  margin-bottom: 0.5rem;
+}
+
+.choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 1.25rem;
+  margin: 0 0 0.5rem;
+  padding: 0.25rem 0.75rem 0.5rem;
+  border: 2px solid var(--border);
+  border-radius: 6px;
+}
+
+.choices legend {
+  font-weight: 600;
+  padding: 0 0.25rem;
+}
+
+label.choice {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 44px;
+  margin: 0;
+  font-weight: 400;
+  cursor: pointer;
+}
+
+label.choice input {
+  width: 1.5rem;
+  height: 1.5rem;
+  min-height: 0;
+  margin: 0;
+}
+
+.edit-form .edit-field {
+  margin-bottom: 0;
+}
+
+.edit-notice:empty {
+  display: none;
+}
+
+.edit-notice {
+  margin: 0 0 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border-left: 6px solid var(--focus);
+  background: #fdf0e1;
+  font-weight: 600;
+}
