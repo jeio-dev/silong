@@ -13,12 +13,12 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Callable, Optional
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 
-from silong import db, rules
+from silong import db, rules, status
 from silong.config import Config, load_config
 
 logger = logging.getLogger(__name__)
@@ -212,6 +212,41 @@ def create_app(
         if app.state.worker is not None:
             app.state.worker.wake()
         return _report_view(row)
+
+    @app.get("/api/status")
+    async def hub_status(request: Request, response: Response) -> dict:
+        """One consistent snapshot of the hub's current state. Receipt and list
+        polling never wait on the (bounded) model-availability probe here."""
+        response.headers["Cache-Control"] = "no-store"
+        try:
+            rows = await run_in_threadpool(db.list_reports, config.db_path)
+        except sqlite3.Error:
+            logger.exception("Could not read the hub status")
+            raise HTTPException(503, STORAGE_ERROR)
+        hub_url = status.resolve_phone_url(config, request.headers.get("host", ""))
+        worker = app.state.worker
+        worker_running = worker is not None and worker.is_alive()
+        model_state, model_checked_at = await status.check_model(config.model)
+        return status.build_status(
+            rows,
+            hub_url=hub_url,
+            model=config.model,
+            model_state=model_state,
+            model_checked_at=model_checked_at,
+            worker_running=worker_running,
+        )
+
+    @app.get("/api/qr")
+    async def phone_qr(request: Request) -> Response:
+        """An SVG QR for exactly the advertised phone URL, or 409 when none."""
+        hub_url = status.resolve_phone_url(config, request.headers.get("host", ""))
+        if hub_url is None:
+            raise HTTPException(409, status.QR_UNAVAILABLE)
+        return Response(
+            status.make_qr_svg(hub_url),
+            media_type="image/svg+xml",
+            headers={"Cache-Control": "no-store"},
+        )
 
     @app.get("/", include_in_schema=False)
     async def report_page() -> FileResponse:
