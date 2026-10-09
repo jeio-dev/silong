@@ -35,7 +35,7 @@
       <p class="hint">Reports are kept on this phone until the hub confirms them with a reference number.</p>
       <ol id="pending-list" class="reports"></ol>
       <div class="actions">
-        <button id="retry-now" type="button" class="secondary">Try again now / Subukan muli ngayon</button>
+        <button id="retry-now" type="button" class="secondary" hidden>Try again now / Subukan muli ngayon</button>
       </div>
     </section>
 
@@ -44,7 +44,10 @@
       <ol id="received-list" class="reports"></ol>
     </section>
 
-    <p class="note">Keep this page open until your reports are confirmed. Reports are saved on this phone first, so they keep sending automatically every few seconds while this page is open — stay on this address and Wi-Fi. If this page could not be opened now (no connection to the hub), saved reports resume the next time this same address loads.</p>
+    <footer class="note">
+      <p>Keep this page open on this Wi-Fi until each report has a reference number. Saved reports resend automatically while the page is open, or the next time this same address opens.</p>
+      <p lang="fil">Huwag isara ang page na ito habang nasa Wi-Fi na ito hanggang may reference number ang bawat report. Kusang ipapadala muli ang mga naka-save na report habang bukas ang page, o sa susunod na buksan ang address na ito.</p>
+    </footer>
   </main>
   <script src="/static/outbox.js"></script>
   <script src="/static/report.js"></script>

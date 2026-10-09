@@ -91,6 +91,13 @@ function setFrozen(frozen, clientId) {
   frozenFor = frozen ? clientId : null;
 }
 
+function confirmedText(confirmedAt) {
+  const date = new Date(confirmedAt);
+  if (Number.isNaN(date.getTime())) return null;
+  const time = date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return "Confirmed / Natanggap " + time;
+}
+
 function preview(text) {
   const oneLine = text.replace(/\s+/g, " ").trim();
   return oneLine.length > PREVIEW_CHARS ? oneLine.slice(0, PREVIEW_CHARS) + "…" : oneLine;
@@ -154,7 +161,10 @@ function removeDurable(clientId) {
 }
 
 function renderQueues() {
-  pendingCount.textContent = readFailed ? "unavailable" : "(" + (pendingRows.length + unsavedItems.length) + ")";
+  const waiting = pendingRows.length + unsavedItems.length;
+  pendingCount.textContent = readFailed ? "unavailable" : "(" + waiting + ")";
+  // Nothing to retry once the queue is known to be empty.
+  retryNowButton.hidden = !readFailed && waiting === 0;
   pendingList.replaceChildren();
   receivedList.replaceChildren();
 
@@ -182,9 +192,12 @@ function renderQueues() {
     pendingList.append(card);
   }
 
-  for (const receipt of receipts.slice().sort((a, b) => (a.confirmed_at < b.confirmed_at ? -1 : 1))) {
+  // Newest confirmation first.
+  for (const receipt of receipts.slice().sort((a, b) => (a.confirmed_at < b.confirmed_at ? 1 : -1))) {
     const card = element("li", "report receipt");
     card.append(element("span", "reference", "Reference #" + receipt.id));
+    const confirmed = confirmedText(receipt.confirmed_at);
+    if (confirmed) card.append(element("p", "report-meta", confirmed));
     if (receipt.unrecorded) {
       card.append(
         element("p", "report-meta", "Confirmed by the hub, but could not be saved on this phone; it may send again.")

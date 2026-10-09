@@ -15,6 +15,8 @@
   --error-border: #b3261e;
   --info-bg: #e8f0fa;
   --info-border: #0b5cad;
+  --divider: #d4d4cf;
+  --critical-bg: #fcefee;
 }
 
 * {
@@ -128,6 +130,15 @@ button:disabled {
   display: none !important;
 }
 
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
 :focus-visible {
   outline: 3px solid var(--focus);
   outline-offset: 2px;
@@ -217,6 +228,67 @@ button:disabled {
   color: var(--muted);
 }
 
+/* Untriaged board cards: the state as a pill, never an urgency color. */
+.status-queued,
+.status-extracting,
+.status-failed {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.1rem 0.7rem;
+  border: 2px solid var(--border);
+  border-radius: 999px;
+  background: var(--background);
+  color: var(--text);
+  font-size: 1rem;
+}
+
+.status-extracting {
+  border-color: var(--info-border);
+  background: var(--info-bg);
+}
+
+.status-extracting::before {
+  content: "";
+  flex: none;
+  width: 0.6rem;
+  height: 0.6rem;
+  border-radius: 50%;
+  background: var(--info-border);
+}
+
+.status-failed {
+  border-color: var(--error-border);
+  background: var(--error-bg);
+}
+
+.empty-state {
+  margin: 0 0 0.75rem;
+  padding: 0.75rem 1rem;
+  border: 2px dashed var(--divider);
+  border-radius: 6px;
+  color: var(--muted);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .status-extracting::before {
+    animation: pulse 1.2s ease-in-out infinite;
+  }
+
+  .report.just-changed {
+    animation: just-changed 2.4s ease-out;
+  }
+}
+
+@keyframes pulse {
+  50% { opacity: 0.25; }
+}
+
+@keyframes just-changed {
+  from { box-shadow: 0 0 0 5px var(--focus); }
+  to { box-shadow: 0 0 0 5px transparent; }
+}
+
 .report-text {
   margin: 0.5rem 0;
   white-space: pre-wrap;
@@ -241,7 +313,7 @@ button:disabled {
   --low: #4a5866;
 }
 
-.report.urgency-critical { border-left: 12px solid var(--critical); }
+.report.urgency-critical { border-left: 12px solid var(--critical); background: var(--critical-bg); }
 .report.urgency-high { border-left: 12px solid var(--high); }
 .report.urgency-medium { border-left: 12px solid var(--medium); }
 .report.urgency-low { border-left: 12px solid var(--low); }
@@ -411,9 +483,30 @@ label.choice input {
 /* Phone outbox queue, pending reports and confirmed references. */
 
 .queue {
-  margin-top: 1.5rem;
-  padding-top: 0.75rem;
-  border-top: 2px solid var(--border);
+  margin-top: 1.25rem;
+  padding: 0.25rem 1rem 1rem;
+  border: 1px solid var(--divider);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.queue h2 {
+  margin: 0.75rem 0 0.5rem;
+}
+
+footer.note {
+  margin-top: 1.25rem;
+}
+
+footer.note p {
+  margin: 0 0 0.5rem;
+}
+
+/* Phone widths: the main button spans the form. */
+@media (max-width: 30rem) {
+  #report-form .actions button {
+    flex: 1 1 100%;
+  }
 }
 
 .count {
@@ -455,48 +548,97 @@ label.choice input {
   margin-top: 0.25rem;
 }
 
-/* Staff board status header. */
+/* Staff board status header: phone address and QR beside the counts, kept
+   short so the first cards stay in view. */
 
 .status-header {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
-  gap: 0.75rem;
-  margin: 1rem 0 1.25rem;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 27rem);
+  gap: 0.75rem 1.5rem;
+  margin: 0.75rem 0 1.25rem;
+  padding: 0.75rem 1rem;
+  background: var(--surface);
+  border: 2px solid var(--border);
+  border-radius: 6px;
+}
+
+@media (max-width: 48rem) {
+  .status-header {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .status-header h2 {
   font-size: 1.1rem;
-  margin: 0 0 0.25rem;
+  margin: 0 0 0.15rem;
 }
 
-.status-cell {
-  background: var(--surface);
-  border: 2px solid var(--border);
-  border-radius: 6px;
-  padding: 0.6rem 0.75rem;
+.connect {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-start;
+}
+
+.connect-text {
+  min-width: 0;
+}
+
+.connect-text p {
+  margin: 0.15rem 0;
 }
 
 .phone-url {
   display: block;
-  font-size: 1.15rem;
+  font-size: 1.25rem;
   font-weight: 700;
   color: var(--accent);
   overflow-wrap: anywhere;
 }
 
+.readiness {
+  font-size: 1rem;
+}
+
 #phone-qr {
   display: block;
-  width: 168px;
-  height: 168px;
-  margin-top: 0.4rem;
+  flex: none;
+  width: 140px;
+  height: 140px;
 }
 
 #phone-qr[hidden] {
   display: none;
 }
 
+.stat-chips {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0 0 0.6rem;
+  padding: 0;
+}
+
+.stat {
+  padding: 0.2rem 0.75rem;
+  border: 2px solid var(--divider);
+  border-radius: 999px;
+  background: var(--background);
+  font-weight: 600;
+}
+
+.stat-date {
+  color: var(--muted);
+  font-size: 0.95rem;
+  font-weight: 400;
+}
+
+.stats-heading {
+  font-size: 1rem;
+  margin: 0 0 0.3rem;
+}
+
 .counts {
-  margin: 0.15rem 0;
   font-weight: 600;
 }
 
@@ -504,14 +646,14 @@ label.choice input {
   list-style: none;
   margin: 0;
   padding: 0;
-  display: grid;
-  grid-template-columns: repeat(2, auto);
-  gap: 0.25rem 1rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 1rem;
 }
 
 .urgency-counts li {
   display: flex;
-  gap: 0.5rem;
+  gap: 0.4rem;
   align-items: center;
   font-weight: 600;
 }

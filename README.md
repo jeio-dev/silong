@@ -101,11 +101,11 @@ The status header at the top is refreshed every two seconds as well, separately 
 - **Audio**: "Text only: audio unavailable" (audio arrives in phase 04).
 - **Queue**: *Queued* counts reports waiting for triage; *Processing* counts the one being extracted. Failed and staff-completed reports are not counted here.
 - **Today**: every report received since midnight on the hub's clock (local date shown), including resolved and failed ones.
-- **Urgency (unresolved)**: Critical, High, Medium and Low counts of triaged reports that are not resolved.
+- **Unresolved by urgency**: Critical, High, Medium and Low counts of triaged reports that are not resolved.
 
 All counts come from one read of the database. If a status check fails, the last values stay on screen with "Status may be out of date; the values shown are the last received." They are never replaced with zeros.
 
-- **Not yet triaged** is shown first, so new and failed reports stay visible. Cards here never show an urgency.
+- **Not yet triaged** is shown first, so new and failed reports stay visible. Cards here never show an urgency; their state (Queued, Extracting, Triage failed) is shown as a labelled pill. A card that arrives or moves to another section after the board loads is outlined briefly (no animation when the device asks for reduced motion).
 - **Triaged** lists reports from most to least urgent; within an urgency, the oldest report comes first. Each card shows the urgency word and colour, the reason, the extracted fields, the summary, "Extraction took N.N s" (measured on the hub for that report), "Edited by staff" when staff changed it, and the original text under **Original report**.
 - **Edit** (or **Complete by hand** for a report without fields) opens a form for all fields. Saving recomputes the urgency. If the report changes while the form is open, the form says so instead of being replaced.
 - **Mark resolved** moves a report to the collapsed **Resolved** section; **Reopen** brings it back.
@@ -124,7 +124,7 @@ Extraction can be wrong. Staff should read the original text of every report and
 ### How the phone form delivers reports
 
 - Each report is saved in the phone browser's storage (IndexedDB) first, then sent. "Waiting to send" lists saved reports the hub has not confirmed yet, with the reason for the last failure; "Received by the hub" lists reference numbers. Both lists survive a reload.
-- While the page is open, the form tries again every five seconds, one report at a time, oldest first. A request that gets no answer is abandoned after 20 seconds, so one stuck request can delay the next attempts by up to that long. Try again now starts an attempt at once.
+- While the page is open, the form tries again every five seconds, one report at a time, oldest first. A request that gets no answer is abandoned after 20 seconds, so one stuck request can delay the next attempts by up to that long. Try again now, shown while any report is waiting, starts an attempt at once. References are listed newest first with the time the hub confirmed them.
 - Each report keeps the same ID on every attempt, so if the hub saved it but the answer was lost, the next attempt gets the original reference instead of a second copy. Two open tabs on the same phone may both send a report; the hub still stores it once.
 - Saved reports belong to the exact address that was opened (for example `http://192.168.1.20:8000`). If the hub's address or port changes, the phone opens a new, empty list; reopen the old address to finish sending.
 - Nothing is sent while the page is closed. A reload or first load without a connection to the hub cannot open the page at all (there is no offline copy of the page); once the same address loads again, saved reports resume.

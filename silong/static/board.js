@@ -7,7 +7,8 @@
 // report id too, so a card rebuilt while its action runs still shows them. The server sends reports
 // in board order; the board only splits them into sections and never re-sorts.
 // A card whose edit form is open is never rebuilt by a poll; if its report
-// changes meanwhile, the form says so.
+// changes meanwhile, the form says so. A card that moves to another section,
+// or arrives after the first load, is briefly outlined so staff notice it.
 
 const POLL_MS = 2000;
 const POLL_TIMEOUT_MS = 5000;
@@ -15,9 +16,17 @@ const POLL_TIMEOUT_MS = 5000;
 const connection = document.getElementById("connection");
 const empty = document.getElementById("empty");
 const SECTIONS = {
-  unclassified: { list: document.getElementById("unclassified"), count: document.getElementById("unclassified-count") },
-  triaged: { list: document.getElementById("triaged"), count: document.getElementById("triaged-count") },
-  resolved: { list: document.getElementById("resolved"), count: document.getElementById("resolved-count") },
+  unclassified: {
+    list: document.getElementById("unclassified"),
+    count: document.getElementById("unclassified-count"),
+    empty: document.getElementById("unclassified-empty"),
+  },
+  triaged: {
+    list: document.getElementById("triaged"),
+    count: document.getElementById("triaged-count"),
+    empty: document.getElementById("triaged-empty"),
+  },
+  resolved: { list: document.getElementById("resolved"), count: document.getElementById("resolved-count"), empty: null },
 };
 
 // Hub status header, polled independently of the report list.
@@ -54,13 +63,14 @@ const BLANK_FIELDS = {
   injured: false, injury_note: null, needs: [], summary: "",
 };
 
-const cards = new Map(); // report id -> { node, key }
+const cards = new Map(); // report id -> { node, key, section }
 const actionStates = new Map(); // report id -> { pending, message, error }
 const editors = new Map(); // report id -> { report, form, notice, feedback, pending }
 let lastReports = [];
 let lastSuccess = null;
 let requested = 0;
 let rendered = 0;
+let renderedOnce = false; // no highlight for cards present on the first load
 
 // Status header state (kept across failed polls, with a stale warning).
 let lastStatus = null;
@@ -197,7 +207,9 @@ function reportCard(report) {
   if (report.resolved) {
     actions.append(actionButton("Reopen", "reopen", "secondary", () => act(report.id, "PATCH", path, { resolved: false })));
   } else {
-    actions.append(actionButton(report.fields ? "Edit" : "Complete by hand", "edit", "", () => openEditor(item, report)));
+    // Waiting reports keep their manual completion quiet; a failed one invites it.
+    const editClass = report.fields || report.status === "failed" ? "" : "secondary";
+    actions.append(actionButton(report.fields ? "Edit" : "Complete by hand", "edit", editClass, () => openEditor(item, report)));
     actions.append(actionButton("Mark resolved", "resolve", "secondary", () => act(report.id, "PATCH", path, { resolved: true })));
   }
   item.append(actions, feedback);
@@ -419,6 +431,13 @@ function carryOver(oldCard, newCard) {
   return null;
 }
 
+// Outline a card once; the class goes when the animation ends (with reduced
+// motion there is no animation and the class is harmless).
+function highlight(node) {
+  node.classList.add("just-changed");
+  node.addEventListener("animationend", () => node.classList.remove("just-changed"), { once: true });
+}
+
 // Put `nodes` into `list` in order, moving only nodes that are out of place.
 function syncList(list, nodes) {
   nodes.forEach((node, index) => {
@@ -445,8 +464,10 @@ function render(reports) {
     }
     if (!entry || entry.key !== key) {
       const node = reportCard(report);
+      const section = sectionOf(report);
       if (entry) refocus.push(carryOver(entry.node, node));
-      entry = { node, key };
+      if (entry ? entry.section !== section : renderedOnce) highlight(node);
+      entry = { node, key, section };
       cards.set(report.id, entry);
     }
     seen.add(report.id);
@@ -458,10 +479,12 @@ function render(reports) {
   for (const [name, section] of Object.entries(SECTIONS)) {
     syncList(section.list, groups[name]);
     section.count.textContent = "(" + groups[name].length + ")";
+    if (section.empty) section.empty.hidden = groups[name].length > 0 || reports.length === 0;
   }
   if (active !== document.activeElement && active && active.isConnected) active.focus({ preventScroll: true });
   for (const button of refocus) if (button) button.focus();
   empty.hidden = reports.length > 0;
+  renderedOnce = true;
 }
 
 function showConnection(ok) {

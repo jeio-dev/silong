@@ -50,3 +50,12 @@ After a normally saved report is delivered, the phone's feedback line still says
 - Decoding or scanning the QR code with a phone or independent decoder.
 - Board readability on a projector or across a room.
 - Real Ollama extraction during this journey (phase 02 holds the measured model results).
+
+## T6 UI polish (2026-10-09)
+
+Same host and Chromium 156.0.8078.4 as above, synthetic reports only.
+
+- Gate: `python -m unittest discover -s tests -v`, 201 tests OK. `node tests/browser_outbox.cjs`, `node tests/browser_delivery.cjs` (20 POST attempts) and `node tests/browser_header.cjs` all passed. `node --check` passed on both scripts, and `git diff --check` was clean.
+- Journey rerun (`node .kaylo/phases/03-offline-delivery/03-journey.cjs`, exit 0, no page errors or non-hub requests). In the 1280×900 board screenshot the status header ends at about 352 px, where the same state's header ended at about 600 px before T6. In the 412 px phone screenshot, references read #6 down to #1, each with "Confirmed / Natanggap HH:MM", and "Try again now" is hidden while nothing is waiting.
+- Scratch visual check (not committed), run against a temp-DB hub with `SILONG_MODEL` unset and `SILONG_HUB_URL=http://192.168.1.20:<port>`, using five synthetic reports: two completed by hand (Critical, High), one set to failed in SQLite, two queued. Measured at 1280×900: header bottom 321 px, first card bottom 610 px (fully in view), urgency counts on one row, no horizontal overflow, QR 140 px loaded from `/api/qr`. "Complete by hand" is `secondary` on queued cards and primary on the failed card. The Critical card background is rgb(252, 239, 238). Empty-state lines are hidden while their sections have cards. No card was outlined on the first load. A report completed after load moved to Triaged with `just-changed`, and the class was gone 3 s later. The inline editor on the Critical card stayed open across a poll. No overflow at 412×915. With reduced motion, a new card's `animation-name` was `none`. No page errors.
+- Not run: projector or across-room readability, A54 or Windows rendering, physical QR scan.
