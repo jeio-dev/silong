@@ -30,7 +30,7 @@ STORAGE_ERROR = "The hub could not save or read reports right now. Please try ag
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 NOT_FOUND = "No report has that id."
 PATCH_KEYS = ("fields", "resolved")
-# SQLite's largest integer id; larger path ids cannot name a report.
+# Report ids are positive and at most SQLite's largest integer; others cannot name a report.
 MAX_ID = 2**63 - 1
 
 
@@ -178,7 +178,7 @@ def create_app(
         except ValueError:
             body = None
         fields, resolved = _parse_patch(body)
-        if report_id > MAX_ID:
+        if not 1 <= report_id <= MAX_ID:
             raise HTTPException(404, NOT_FOUND)
         try:
             if fields is not None:
@@ -198,7 +198,7 @@ def create_app(
     @app.post("/api/reports/{report_id}/retry")
     async def retry_report(report_id: int) -> dict:
         """Requeue a failed report for extraction; any other state is a 409."""
-        if report_id > MAX_ID:
+        if not 1 <= report_id <= MAX_ID:
             raise HTTPException(404, NOT_FOUND)
         try:
             row, retried = await run_in_threadpool(db.retry_failed, config.db_path, report_id)

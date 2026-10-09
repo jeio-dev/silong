@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import socket
 import sqlite3
 import subprocess
@@ -504,7 +505,7 @@ class StaffValidationTest(StaffApiTestCase):
 
     def test_unknown_id_is_404(self):
         self.new_report()
-        for path in ("999", "99999999999999999999"):
+        for path in ("999", "0", "-1", "99999999999999999999", "-9223372036854775809"):
             with self.subTest(path=path):
                 self.assertProblem(self.patch(path, {"resolved": True}), 404, "No report")
                 self.assertProblem(self.patch(path, {"fields": MEDIUM_FIELDS}), 404, "No report")
@@ -631,9 +632,22 @@ class PageTest(ApiTestCase):
     def test_board_polls_every_two_seconds(self):
         self.assertIn("const POLL_MS = 2000;", self.client.get("/static/board.js").text)
 
-    def test_queued_reports_are_never_labelled_low(self):
-        board = self.client.get("/static/board.js").text + self.client.get("/board").text
-        self.assertNotRegex(board, r"(?i)\blow\b")
+    def test_unclassified_status_labels_carry_no_urgency_word(self):
+        script = self.client.get("/static/board.js").text
+        block = re.search(r"const STATUS_LABELS = \{(.*?)\};", script, re.S)
+        self.assertIsNotNone(block)
+        labels = re.findall(r'"([^"]*)"', block.group(1))
+        self.assertEqual(len(labels), 3)
+        for label in labels:
+            with self.subTest(label=label):
+                self.assertNotRegex(label, r"(?i)\b(critical|high|medium|low)\b")
+
+    def test_board_has_three_sections_with_unclassified_first(self):
+        page = self.client.get("/board").text
+        positions = [page.find(f'<ol id="{name}"') for name in ("unclassified", "triaged", "resolved")]
+        self.assertNotIn(-1, positions)
+        self.assertEqual(positions, sorted(positions))
+        self.assertRegex(page, r'<details class="resolved-section">\s*<summary>')
 
 
 class StartupTest(unittest.TestCase):
