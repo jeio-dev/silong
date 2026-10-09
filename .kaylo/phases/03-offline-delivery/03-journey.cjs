@@ -29,6 +29,8 @@ const { chromium } = require(PLAYWRIGHT_MODULE);
 const observed = { lan_ip: LAN_IP, steps: [] };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const note = (step, data) => { observed.steps.push({ step, ...data }); };
+// Set once the hub is started; also run on failure so no hub or temp DB is left behind.
+let cleanup = async () => {};
 
 function freePort() {
   const s = net.createServer();
@@ -106,6 +108,19 @@ async function main() {
   let hubLog = "";
   hub.stdout.on("data", (c) => (hubLog += c));
   hub.stderr.on("data", (c) => (hubLog += c));
+  const hubExited = new Promise((r) => hub.once("exit", r));
+  cleanup = async () => {
+    cleanup = async () => {};
+    hub.kill();
+    // Unblock the worker's held extraction so shutdown need not wait out its join timeout.
+    for (const r of heldResponses) r.destroy();
+    // The hub may still write the DB while shutting down; remove it only after exit.
+    const forced = setTimeout(() => hub.kill("SIGKILL"), 15000);
+    await hubExited;
+    clearTimeout(forced);
+    await new Promise((r) => ollama.close(r));
+    fs.rmSync(dbDir, { recursive: true, force: true });
+  };
   const origin = "http://" + LAN_IP + ":" + port;
   for (let i = 0; ; i++) {
     try { const r = await request("GET", origin + "/api/reports"); if (r.status === 200) break; } catch (e) { /* not up */ }
@@ -342,10 +357,11 @@ async function main() {
 
   console.log(JSON.stringify(observed, null, 2));
   await browser.close();
-  hub.kill();
-  for (const r of heldResponses) r.destroy();
-  ollama.close();
-  fs.rmSync(dbDir, { recursive: true, force: true });
+  await cleanup();
 }
 
-main().catch((e) => { console.error(e); console.error(JSON.stringify(observed, null, 2)); process.exit(1); });
+main().catch(async (e) => {
+  console.error(e); console.error(JSON.stringify(observed, null, 2));
+  try { await cleanup(); } catch (c) { console.error("cleanup failed:", c); }
+  process.exit(1);
+});
