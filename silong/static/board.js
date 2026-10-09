@@ -13,7 +13,7 @@ const empty = document.getElementById("empty");
 
 const STATUS_LABELS = {
   queued: "Queued: waiting for triage, no urgency assigned",
-  processing: "Processing: no urgency assigned yet",
+  extracting: "Extracting: no urgency assigned yet",
   failed: "Triage failed: no urgency assigned",
 };
 

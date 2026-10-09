@@ -55,8 +55,11 @@ def _running_hub(db_path, port, **extra_env):
     """Run a real `python -m silong` until it serves, then stop it on exit.
 
     The yielded object's `output` holds the server log once the block ends.
+    Inherited SILONG_MODEL and OLLAMA_HOST are dropped, so a hub only reaches
+    a model when the test passes one in `extra_env`.
     """
-    env = dict(os.environ, SILONG_PORT=str(port), SILONG_DB=str(db_path), **extra_env)
+    env = {k: v for k, v in os.environ.items() if k not in ("SILONG_MODEL", "OLLAMA_HOST")}
+    env.update(SILONG_PORT=str(port), SILONG_DB=str(db_path), **extra_env)
     proc = subprocess.Popen(
         [sys.executable, "-m", "silong"],
         cwd=REPO_ROOT,
@@ -92,9 +95,10 @@ class ApiTestCase(unittest.TestCase):
             self.addCleanup(patcher.stop)
         self.client = self.open_client()
 
-    def open_client(self):
-        config = Config(model="qwen3:4b", whisper="small", port=8000, db_path=self.path)
-        client = TestClient(create_app(config))
+    def open_client(self, model=None, **app_options):
+        """Open the app; no worker runs unless a test passes a model (with a fake `extract`)."""
+        config = Config(model=model, whisper="small", port=8000, db_path=self.path)
+        client = TestClient(create_app(config, **app_options))
         client.__enter__()
         self.addCleanup(client.__exit__, None, None, None)
         return client
