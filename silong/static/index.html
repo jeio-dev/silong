@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Silong: send a report</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <main class="page">
+    <h1>Silong</h1>
+    <p class="lead">Send a report to the evacuation center staff. Magpadala ng ulat sa mga staff ng evacuation center.</p>
+
+    <form id="report-form" novalidate>
+      <div class="field">
+        <label for="reporter">Your name (optional) / Pangalan (opsyonal)</label>
+        <input id="reporter" name="reporter" type="text" autocomplete="name" maxlength="200">
+      </div>
+      <div class="field">
+        <label for="text">What is happening? / Ano ang nangyayari?</label>
+        <p id="text-hint" class="hint">Who needs help, where, and what they need. Sino, saan, at ano ang kailangan.</p>
+        <textarea id="text" name="text" rows="6" required aria-describedby="text-hint"></textarea>
+      </div>
+      <div class="actions">
+        <button id="send" type="submit">Send report / Ipadala</button>
+        <button id="retry" type="button" hidden>Try again / Subukan ulit</button>
+        <button id="new-report" type="button" class="secondary" hidden>Start a new report</button>
+      </div>
+    </form>
+
+    <div id="feedback" class="feedback" role="status" aria-live="polite" tabindex="-1"></div>
+
+    <p class="note">Keep this page open until you see a reference number. This page does not save reports offline yet; if sending fails, press Try again when you are connected to the center's Wi-Fi.</p>
+  </main>
+  <script src="/static/report.js"></script>
+</body>
+</html>

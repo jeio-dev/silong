@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Silong: staff board</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <main class="page board">
+    <h1>Silong staff board</h1>
+    <p id="connection" class="connection" role="status" aria-live="polite">Connecting to the hub…</p>
+
+    <section aria-labelledby="unclassified-heading">
+      <h2 id="unclassified-heading">Not yet triaged <span id="unclassified-count"></span></h2>
+      <p class="hint">AI triage is not available yet. These reports have no urgency assigned; read each one.</p>
+      <p id="empty" class="hint" hidden>No reports yet.</p>
+      <ol id="unclassified" class="reports"></ol>
+    </section>
+  </main>
+  <script src="/static/board.js"></script>
+</body>
+</html>

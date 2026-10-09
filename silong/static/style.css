@@ -1,0 +1,232 @@
+/* Shared styles for the reporter form and staff board. Local only, no web fonts. */
+
+:root {
+  --text: #1a1a1a;
+  --muted: #4a4a4a;
+  --background: #f6f6f4;
+  --surface: #ffffff;
+  --border: #8a8a8a;
+  --accent: #0b5cad;
+  --accent-text: #ffffff;
+  --focus: #b35900;
+  --success-bg: #e3f4e6;
+  --success-border: #1d7a35;
+  --error-bg: #fbe7e5;
+  --error-border: #b3261e;
+  --info-bg: #e8f0fa;
+  --info-border: #0b5cad;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--background);
+  color: var(--text);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-size: 1.125rem;
+  line-height: 1.5;
+}
+
+.page {
+  max-width: 40rem;
+  margin: 0 auto;
+  padding: 1rem;
+}
+
+.page.board {
+  max-width: 64rem;
+}
+
+h1 {
+  font-size: 1.75rem;
+  margin: 0.5rem 0;
+}
+
+h2 {
+  font-size: 1.35rem;
+}
+
+.lead,
+.hint,
+.note {
+  color: var(--muted);
+}
+
+.hint {
+  margin: 0 0 0.5rem;
+  font-size: 1rem;
+}
+
+.note {
+  font-size: 1rem;
+}
+
+.field {
+  margin-bottom: 1rem;
+}
+
+label {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 0.25rem;
+}
+
+input,
+textarea {
+  width: 100%;
+  min-height: 44px;
+  padding: 0.6rem;
+  border: 2px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+
+textarea {
+  resize: vertical;
+}
+
+input[readonly],
+textarea[readonly] {
+  background: #ececec;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+button {
+  min-height: 48px;
+  min-width: 44px;
+  padding: 0.6rem 1.25rem;
+  border: 2px solid var(--accent);
+  border-radius: 6px;
+  background: var(--accent);
+  color: var(--accent-text);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+button.secondary {
+  background: var(--surface);
+  color: var(--accent);
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.feedback:empty {
+  display: none;
+}
+
+.feedback {
+  margin-top: 1rem;
+  padding: 0.75rem 1rem;
+  border-left: 6px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+}
+
+.feedback p {
+  margin: 0.25rem 0;
+}
+
+.feedback.success {
+  background: var(--success-bg);
+  border-color: var(--success-border);
+}
+
+.feedback.error {
+  background: var(--error-bg);
+  border-color: var(--error-border);
+}
+
+.feedback.info {
+  background: var(--info-bg);
+  border-color: var(--info-border);
+}
+
+.feedback .reference {
+  font-size: 2rem;
+  font-weight: 700;
+}
+
+.connection {
+  padding: 0.5rem 0.75rem;
+  border-radius: 4px;
+  border-left: 6px solid var(--border);
+  background: var(--surface);
+}
+
+.connection.ok {
+  border-color: var(--success-border);
+}
+
+.connection.stale {
+  background: var(--error-bg);
+  border-color: var(--error-border);
+  font-weight: 600;
+}
+
+.reports {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.report {
+  margin-bottom: 0.75rem;
+  padding: 0.75rem 1rem;
+  border: 2px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+.report-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  align-items: baseline;
+}
+
+.report .reference {
+  font-size: 1.35rem;
+  font-weight: 700;
+}
+
+.status {
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.report-text {
+  margin: 0.5rem 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.report-meta,
+.report-error {
+  margin: 0;
+  font-size: 1rem;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
