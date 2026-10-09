@@ -348,6 +348,62 @@ class AppWorkerTest(ApiTestCase):
         self.assertEqual((view["urgency"], view["urgency_reason"]), rules.classify(FIELDS))
         self.assertIsInstance(view["llm_ms"], int)
 
+    def test_staff_edit_during_extraction_wins_over_the_worker_result(self):
+        for outcome in ("result", "error"):
+            with self.subTest(outcome=outcome):
+                held = HeldExtractor()
+                extract = held
+                if outcome == "error":
+
+                    def extract(text):
+                        held(text)
+                        raise ExtractionError("Model reply did not match the report fields")
+
+                client = self.open_with(extract)
+                try:
+                    report_id = self.post_text(client, TEXT_A).json()["id"]
+                    self.assertTrue(held.started.wait(5))
+                    self.assertEqual(self.listed(client, report_id)["status"], "extracting")
+                    edit = client.patch(f"/api/reports/{report_id}", json={"fields": EDITED_FIELDS})
+                    self.assertEqual(edit.status_code, 200, edit.text)
+                finally:
+                    held.release.set()
+                # The worker handles reports one at a time, so once a later report is
+                # finished the held outcome has been offered and discarded.
+                later = self.post_text(client, TEXT_B).json()["id"]
+                self.assertTrue(
+                    wait_until(lambda: self.listed(client, later)["status"] in ("done", "failed"))
+                )
+
+                self.assertEqual(self.listed(client, report_id), edit.json())
+                self.assertEqual(edit.json()["fields"], EDITED_FIELDS)
+                self.assertEqual(edit.json()["urgency_reason"], "Critical: rescue needed")
+                client.__exit__(None, None, None)
+
+    def test_retry_wakes_the_worker_and_the_report_is_processed(self):
+        attempts = []
+
+        def fail_once(text):
+            attempts.append(text)
+            if len(attempts) == 1:
+                raise ExtractionError("Ollama is not reachable at http://127.0.0.1:9")
+            return FIELDS
+
+        client = self.open_with(fail_once)
+        report_id = self.post_text(client, TEXT_A).json()["id"]
+        self.assertTrue(wait_until(lambda: self.listed(client, report_id)["status"] == "failed"))
+
+        worker = client.app.state.worker
+        with mock.patch.object(worker, "wake", wraps=worker.wake) as wake:
+            response = client.post(f"/api/reports/{report_id}/retry")
+        self.assertEqual(response.status_code, 200, response.text)
+        wake.assert_called_once_with()
+
+        self.assertTrue(wait_until(lambda: self.listed(client, report_id)["status"] == "done"))
+        view = self.listed(client, report_id)
+        self.assertEqual((view["fields"], view["error"], view["edited"]), (FIELDS, None, False))
+        self.assertEqual(attempts, [TEXT_A, TEXT_A])
+
     def test_injected_extract_skips_default_warm_up_and_shutdown_joins(self):
         client = self.open_with(fake_extract)
         worker = client.app.state.worker

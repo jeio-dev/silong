@@ -163,6 +163,72 @@ def recover_interrupted(db_path: PathLike) -> int:
     )
 
 
+def _update_one(db_path: PathLike, report_id: int, sql: str, params: tuple) -> tuple[Optional[dict], bool]:
+    """Run an UPDATE guarded by `id = ?` and read the row back in one transaction.
+
+    Returns (row, changed); row is None when no report has `report_id`.
+    """
+    with closing(connect(db_path)) as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            changed = conn.execute(sql, params).rowcount == 1
+            row = conn.execute("SELECT * FROM reports WHERE id = ?", (report_id,)).fetchone()
+            conn.execute("COMMIT")
+        except BaseException:
+            if conn.in_transaction:
+                conn.execute("ROLLBACK")
+            raise
+    return (dict(row) if row is not None else None), changed
+
+
+def update_fields(
+    db_path: PathLike,
+    report_id: int,
+    fields: dict,
+    urgency: str,
+    reason: str,
+    resolved: Optional[bool] = None,
+) -> Optional[dict]:
+    """Store staff-edited fields, whatever the report's status, and return the row.
+
+    Marks the report edited and done with no error, so a later worker result is
+    discarded. `resolved`, when given, is set in the same transaction. Returns
+    None for an unknown id.
+    """
+    sql = (
+        "UPDATE reports SET fields_json = ?, urgency = ?, urgency_reason = ?,"
+        " edited = 1, status = 'done', error = NULL"
+    )
+    params: tuple = (json.dumps(fields), urgency, reason)
+    if resolved is not None:
+        sql += ", resolved = ?"
+        params += (int(resolved),)
+    row, _changed = _update_one(db_path, report_id, sql + " WHERE id = ?", params + (report_id,))
+    return row
+
+
+def set_resolved(db_path: PathLike, report_id: int, resolved: bool) -> Optional[dict]:
+    """Resolve or reopen a report and return the row, or None for an unknown id."""
+    row, _changed = _update_one(
+        db_path, report_id, "UPDATE reports SET resolved = ? WHERE id = ?", (int(resolved), report_id)
+    )
+    return row
+
+
+def retry_failed(db_path: PathLike, report_id: int) -> tuple[Optional[dict], bool]:
+    """Requeue a failed report and clear its error.
+
+    Returns (row, retried): row is None for an unknown id, and retried is False
+    when the report was not `failed` (it is then unchanged).
+    """
+    return _update_one(
+        db_path,
+        report_id,
+        "UPDATE reports SET status = 'queued', error = NULL WHERE id = ? AND status = 'failed'",
+        (report_id,),
+    )
+
+
 def list_reports(db_path: PathLike) -> list[dict]:
     """All reports, oldest receipt first, with id breaking ties."""
     with closing(connect(db_path)) as conn:
