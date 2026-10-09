@@ -4,7 +4,9 @@
 
 The planning session produced `ROADMAP.md`, `.kaylo/preferences.md`, and `.kaylo/phases/01-durable-intake/01-PLAN.md`. The phase plan retains its design and independent review evidence. Planning and publication are project preparation; the user explicitly clarified that this session is outside Phase 01. Phase 01 contains only its unstarted implementation tasks T1–T5.
 
-The user requested a branch commit and PR using `GITFLOW.md`. The planning files were committed as `5880c03b2cf82ad6d6be27df6b08eaa80204feab` on `phase/01-durable-intake`, pushed, and published in draft PR #1: https://github.com/jeio-dev/silong/pull/1. The existing branch is retained to preserve the published history; its name does not assign planning work to Phase 01.
+The user requested a branch commit and PR using `GITFLOW.md`. The planning files were initially committed as `5880c03b2cf82ad6d6be27df6b08eaa80204feab` on `phase/01-durable-intake`, pushed, and published in draft PR #1: https://github.com/jeio-dev/silong/pull/1.
+
+The user subsequently requested a branch rename. The local and GitHub branch is now `planning/initial-roadmap`, tracking `origin/planning/initial-roadmap`. GitHub automatically closed PR #1 when its head branch was renamed. The replacement planning draft is PR #2: https://github.com/jeio-dev/silong/pull/2. Existing commits were preserved; the future implementation branch `phase/01-durable-intake` remains available for Phase 01 work.
 
 The required gate attempt `python -m unittest discover -s tests -v` exited 127 because `python` was unavailable. The equivalent `python3` invocation exited 1 because `tests/` did not exist. The user explicitly approved a one-time planning-only exception using the passing structural plan validator, recorded independent review, and staged whitespace check. This exception covers publication of this planning session and its bookkeeping correction; the Python gate remains required for implementation commits. No application test pass is claimed. The pre-existing untracked `IDEA.md`, `PRD.md`, and `GITFLOW.md` remain unstaged.
 
