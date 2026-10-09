@@ -358,7 +358,8 @@ async function confirmUnsaved(payload, result) {
 }
 
 // A submitted report whose durable save failed: one immediate send, then no
-// automatic retry until a later save succeeds.
+// automatic retry until a later save succeeds. Like durable delivery, its
+// outcome only replaces feedback that still describes this report.
 async function handleSaveFailure(payload) {
   unsavedItems.push(payload);
   setFrozen(true, payload.client_id);
@@ -366,21 +367,29 @@ async function handleSaveFailure(payload) {
   const result = await serialized(() => postReport(payload));
   if (result.id !== null) {
     await confirmUnsaved(payload, result);
-    showReceived(result.id);
-    textInput.focus();
+    if (feedbackFor === payload.client_id) {
+      showReceived(result.id);
+      textInput.focus();
+    }
   } else {
     rowErrors.set(payload.client_id, failureMessage(result));
-    showFeedback("error", [
-      "Not saved on this phone; not confirmed; no automatic retry. / Hindi na-save sa telepono; hindi kumpirmado; walang awtomatikong pag-retry.",
-      "Your text is kept below. Try again when this phone's storage works, or press the button on the report above.",
-    ]);
+    if (feedbackFor === payload.client_id) {
+      showFeedback(
+        "error",
+        [
+          "Not saved on this phone; not confirmed; no automatic retry. / Hindi na-save sa telepono; hindi kumpirmado; walang awtomatikong pag-retry.",
+          "Your text is kept below. Try again when this phone's storage works, or press the button on the report above.",
+        ],
+        payload.client_id
+      );
+    }
     renderQueues();
   }
 }
 
 async function retryUnsaved(item) {
   if (!unsavedItems.some((each) => each.client_id === item.client_id)) return;
-  showFeedback("info", ["Trying again… / Sinusubukan muli…"]);
+  showFeedback("info", ["Trying again… / Sinusubukan muli…"], item.client_id);
   try {
     await Outbox.save(item);
   } catch (error) {
@@ -388,25 +397,30 @@ async function retryUnsaved(item) {
     const result = await serialized(() => postReport(item));
     if (result.id !== null) {
       await confirmUnsaved(item, result);
-      showReceived(result.id);
+      if (feedbackFor === item.client_id) showReceived(result.id);
     } else {
       rowErrors.set(item.client_id, failureMessage(result));
-      showFeedback("error", ["Still not saved or confirmed. / Hindi pa rin na-save o kumpirmado."]);
+      if (feedbackFor === item.client_id) {
+        showFeedback("error", ["Still not saved or confirmed. / Hindi pa rin na-save o kumpirmado."], item.client_id);
+      }
     }
     renderQueues();
     return;
   }
   // Save now worked: the item becomes a normal durable pending report.
+  const current = feedbackFor === item.client_id;
   clearUnsaved(item.client_id);
   pendingRows.push(item);
   renderQueues();
-  showFeedback(
-    "success",
-    ["Saved on this phone; waiting to send. / Na-save sa teleponong ito; naghihintay na maipadala."],
-    item.client_id
-  );
+  if (current) {
+    showFeedback(
+      "success",
+      ["Saved on this phone; waiting to send. / Na-save sa teleponong ito; naghihintay na maipadala."],
+      item.client_id
+    );
+    textInput.focus();
+  }
   triggerPassNow();
-  textInput.focus();
 }
 
 async function submitReport() {

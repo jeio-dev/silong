@@ -479,6 +479,54 @@ async function main() {
     feedbackText = await page.locator("#feedback").textContent();
     assert.ok(feedbackText.includes("Please write what is happening"), "a background receipt keeps the newer message");
 
+    // An unsaved report's late outcome (immediate send, then manual retry)
+    // never replaces a newer report's feedback; its reference is still listed.
+    async function failSaves(count) {
+      await page.evaluate((left) => {
+        const original = window.Outbox.save;
+        window.Outbox.save = function failing(record) {
+          if (left <= 0) return original(record);
+          left -= 1;
+          if (left === 0) window.Outbox.save = original;
+          return Promise.reject(new Error("QuotaExceededError"));
+        };
+      }, count);
+    }
+    async function newerReportThenRelease(olderText, newerText) {
+      await page.click("#new-report");
+      await submit(newerText);
+      await waitText(page, "#feedback", "Saved on this phone; waiting to send");
+      await held.shift().continue(); // the older unsaved report is confirmed now
+      const olderQuery = "SELECT id FROM reports WHERE raw_text = '" + olderText + "'";
+      await waitFor(() => dbQuery(db, olderQuery).length === 1, "older row");
+      const olderId = dbQuery(db, olderQuery)[0][0];
+      await waitText(page, "#received-list", "Reference #" + olderId, 10000);
+      const text = await page.locator("#feedback").textContent();
+      assert.ok(text.includes("waiting to send") && !text.includes("Reference #" + olderId), "older unsaved receipt kept the newer feedback: " + text);
+      await waitFor(() => held.length >= 1, "held newer send");
+      mode = "pass";
+      await releaseHeld();
+      await waitText(page, "#feedback", "Received by the hub", 15000);
+      const newerId = dbQuery(db, "SELECT id FROM reports WHERE raw_text = '" + newerText + "'")[0][0];
+      assert.ok((await page.locator("#feedback").textContent()).includes("Reference #" + newerId), "newer report's own reference shown");
+      await page.waitForFunction(() => document.querySelector("#pending-count").textContent === "(0)", null, { timeout: 15000 });
+    }
+
+    await failSaves(1);
+    mode = "hold";
+    await submit("R3 synthetic D: unsaved, immediate send held.");
+    await waitFor(() => held.length >= 1, "held immediate send D");
+    await newerReportThenRelease("R3 synthetic D: unsaved, immediate send held.", "R3 synthetic E: newer saved report.");
+
+    await failSaves(2);
+    mode = "fail503";
+    await submit("R3 synthetic F: unsaved, manual retry held.");
+    await waitText(page, "#feedback", "Not saved on this phone", 10000);
+    mode = "hold";
+    await page.click("#pending-list .unsaved button");
+    await waitFor(() => held.length >= 1, "held manual retry F");
+    await newerReportThenRelease("R3 synthetic F: unsaved, manual retry held.", "R3 synthetic G: newer saved report.");
+
     // --- layout, labels, tap targets ---
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
     assert.strictEqual(overflow, false, "no horizontal overflow at 412x915");
