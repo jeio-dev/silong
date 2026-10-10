@@ -593,9 +593,9 @@ class PageTest(ApiTestCase):
         self.assertIn('<label for="reporter">', page)
         self.assertIn('src="/static/report.js"', page)
         self.assertIn('href="/static/style.css"', page)
-        # Audio arrives in phase 04; the form offers no audio control yet.
-        self.assertNotIn("audio", page.lower())
-        self.assertNotIn('type="file"', page)
+        # The optional audio control is hidden until the hub reports audio available.
+        self.assertIn('<div id="audio-field" class="field" hidden>', page)
+        self.assertIn('<input id="audio" name="audio" type="file" accept="audio/*"', page)
 
     def test_board_page(self):
         response = self.client.get("/board")

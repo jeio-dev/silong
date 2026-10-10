@@ -30,6 +30,11 @@
         <p id="text-hint" class="hint">Who needs help, where, and what they need. Sino, saan, at ano ang kailangan.</p>
         <textarea id="text" name="text" rows="6" required aria-describedby="text-hint"></textarea>
       </div>
+      <div id="audio-field" class="field" hidden>
+        <label for="audio">Voice recording (optional) / Boses na recording (opsyonal)</label>
+        <p id="audio-hint" class="hint">Record or choose an audio file. You can send a recording without typing. Puwedeng magpadala ng recording kahit walang sulat.</p>
+        <input id="audio" name="audio" type="file" accept="audio/*" aria-describedby="audio-hint">
+      </div>
       <div class="actions">
         <button id="send" type="submit">Send report / Ipadala</button>
         <button id="new-report" type="button" class="secondary" hidden>Start a new report / Magsimula ng bagong report</button>

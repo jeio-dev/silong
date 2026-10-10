@@ -13,10 +13,13 @@
 const SEND_TIMEOUT_MS = 20000;
 const RETRY_MS = 5000;
 const PREVIEW_CHARS = 80;
+const MAX_AUDIO_BYTES = 20 * 1024 * 1024; // matches the hub's limit
 
 const form = document.getElementById("report-form");
 const reporterInput = document.getElementById("reporter");
 const textInput = document.getElementById("text");
+const audioField = document.getElementById("audio-field");
+const audioInput = document.getElementById("audio");
 const sendButton = document.getElementById("send");
 const newReportButton = document.getElementById("new-report");
 const feedback = document.getElementById("feedback");
@@ -28,7 +31,7 @@ const storageNote = document.getElementById("storage-note");
 const retryNowButton = document.getElementById("retry-now");
 
 // In-memory state, refreshed from IndexedDB on each send pass.
-let pendingRows = []; // durable rows { client_id, text, reporter, queued_at }
+let pendingRows = []; // durable rows { client_id, text, reporter, queued_at, audio? }
 let unsavedItems = []; // { client_id, text, reporter, queued_at } whose save failed
 let receipts = []; // { client_id, id, confirmed_at, unrecorded }
 let rowErrors = new Map(); // client_id -> last failure message
@@ -86,6 +89,7 @@ function showFeedback(kind, lines, owner = null) {
 function setFrozen(frozen, clientId) {
   reporterInput.readOnly = frozen;
   textInput.readOnly = frozen;
+  audioInput.disabled = frozen;
   sendButton.hidden = frozen;
   newReportButton.hidden = !frozen;
   frozenFor = frozen ? clientId : null;
@@ -98,9 +102,11 @@ function confirmedText(confirmedAt) {
   return "Confirmed / Natanggap " + time;
 }
 
-function preview(text) {
-  const oneLine = text.replace(/\s+/g, " ").trim();
-  return oneLine.length > PREVIEW_CHARS ? oneLine.slice(0, PREVIEW_CHARS) + "…" : oneLine;
+function preview(item) {
+  const oneLine = (item.text || "").replace(/\s+/g, " ").trim();
+  const text = oneLine.length > PREVIEW_CHARS ? oneLine.slice(0, PREVIEW_CHARS) + "…" : oneLine;
+  if (!item.audio) return text;
+  return text ? "[Voice recording] " + text : "[Voice recording]";
 }
 
 function showReceived(id) {
@@ -118,6 +124,7 @@ function setSaving(on) {
   sendButton.disabled = on;
   reporterInput.readOnly = on || frozenFor !== null;
   textInput.readOnly = on || frozenFor !== null;
+  audioInput.disabled = on || frozenFor !== null;
 }
 
 // The storage note lists every storage problem that is still current.
@@ -172,7 +179,7 @@ function renderQueues() {
     const card = element("li", "report unsaved");
     const header = element("div", "report-header");
     header.append(element("span", "status", "Not saved on this phone"));
-    card.append(header, element("p", "report-text", preview(item.text)));
+    card.append(header, element("p", "report-text", preview(item)));
     const error = rowErrors.get(item.client_id);
     if (error) card.append(element("p", "report-error", error));
     const actions = element("div", "actions");
@@ -186,7 +193,7 @@ function renderQueues() {
 
   for (const row of pendingRows) {
     const card = element("li", "report pending");
-    card.append(element("p", "report-text", preview(row.text)));
+    card.append(element("p", "report-text", preview(row)));
     const error = rowErrors.get(row.client_id);
     if (error) card.append(element("p", "report-meta", "Sending failed: " + error));
     pendingList.append(card);
@@ -224,6 +231,7 @@ async function postReport(payload) {
   body.append("client_id", payload.client_id);
   body.append("text", payload.text);
   if (payload.reporter) body.append("reporter", payload.reporter);
+  if (payload.audio) body.append("audio", payload.audio, payload.audio_name || "recording");
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), SEND_TIMEOUT_MS);
   let status = 0;
@@ -354,6 +362,7 @@ function clearUnsaved(clientId) {
   if (frozenFor === clientId) {
     setFrozen(false, null);
     textInput.value = "";
+    audioInput.value = "";
   }
 }
 
@@ -440,9 +449,14 @@ async function submitReport() {
   // One report per submission: ignore repeats while its save settles, and a
   // frozen unsaved report is retried with its own button, never resubmitted.
   if (saving || frozenFor !== null) return;
-  if (!textInput.value.trim()) {
+  const audio = !audioField.hidden && audioInput.files.length ? audioInput.files[0] : null;
+  if (!textInput.value.trim() && !audio) {
     showFeedback("error", ["Please write what is happening. / Isulat kung ano ang nangyayari."]);
     textInput.focus();
+    return;
+  }
+  if (audio && audio.size > MAX_AUDIO_BYTES) {
+    showFeedback("error", ["The recording is too large (limit 20 MB). Please record a shorter message."]);
     return;
   }
   const payload = {
@@ -451,6 +465,11 @@ async function submitReport() {
     reporter: reporterInput.value.trim() || null,
     queued_at: Date.now(),
   };
+  if (audio) {
+    // Stored in IndexedDB as a Blob so the recording retries like text does.
+    payload.audio = audio;
+    payload.audio_name = audio.name || "recording";
+  }
   showFeedback("info", ["Saving… / Nagse-save…"], payload.client_id);
   setSaving(true);
   try {
@@ -463,6 +482,7 @@ async function submitReport() {
   setSaving(false);
   pendingRows.push(payload);
   textInput.value = ""; // the name is kept for the next report
+  audioInput.value = "";
   rowErrors.delete(payload.client_id);
   renderQueues();
   showFeedback(
@@ -482,6 +502,7 @@ form.addEventListener("submit", (event) => {
 newReportButton.addEventListener("click", () => {
   setFrozen(false, null);
   textInput.value = "";
+  audioInput.value = "";
   showFeedback("info", ["The unsent report stays listed above under “Waiting to send”. Now write a new report below."]);
   textInput.focus();
 });
@@ -492,3 +513,16 @@ retryNowButton.addEventListener("click", () => {
 
 // Each pass reads pending reports and stored references before sending.
 runPass();
+
+// Show the recording field only when the hub says it can transcribe audio.
+// Until a check succeeds the form stays text-only; a failed check is retried.
+async function checkAudio() {
+  try {
+    const response = await fetch("/api/status", { cache: "no-store" });
+    const status = await response.json();
+    audioField.hidden = !(response.ok && status.audio_available === true);
+  } catch (error) {
+    setTimeout(checkAudio, 30000);
+  }
+}
+checkAudio();
