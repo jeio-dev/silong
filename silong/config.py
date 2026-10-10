@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping, Optional
 
+from silong.status import normalize_hub_url, PhoneUrlError
+
 WHISPER_CHOICES = ("small", "base", "off")
 DEFAULT_PORT = 8000
 DEFAULT_DB = "silong.db"
@@ -20,6 +22,7 @@ class Config:
     whisper: str  # One of WHISPER_CHOICES.
     port: int
     db_path: Path
+    hub_url: Optional[str] = None  # Normalized phone-safe http origin, or None.
 
 
 def _get(environ: Mapping[str, str], name: str) -> Optional[str]:
@@ -55,9 +58,19 @@ def load_config(environ: Optional[Mapping[str, str]] = None) -> Config:
         if not 1 <= port <= 65535:
             raise ConfigError(f"SILONG_PORT must be from 1 to 65535; got {port}")
 
+    raw_hub_url = _get(environ, "SILONG_HUB_URL")
+    if raw_hub_url is None:
+        hub_url = None
+    else:
+        try:
+            hub_url = normalize_hub_url(raw_hub_url)
+        except PhoneUrlError as error:
+            raise ConfigError(str(error)) from None
+
     return Config(
         model=_get(environ, "SILONG_MODEL"),
         whisper=whisper,
         port=port,
         db_path=Path(_get(environ, "SILONG_DB") or DEFAULT_DB),
+        hub_url=hub_url,
     )

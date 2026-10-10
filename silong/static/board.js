@@ -7,7 +7,8 @@
 // report id too, so a card rebuilt while its action runs still shows them. The server sends reports
 // in board order; the board only splits them into sections and never re-sorts.
 // A card whose edit form is open is never rebuilt by a poll; if its report
-// changes meanwhile, the form says so.
+// changes meanwhile, the form says so. A card that moves to another section,
+// or arrives after the first load, is briefly outlined so staff notice it.
 
 const POLL_MS = 2000;
 const POLL_TIMEOUT_MS = 5000;
@@ -15,10 +16,41 @@ const POLL_TIMEOUT_MS = 5000;
 const connection = document.getElementById("connection");
 const empty = document.getElementById("empty");
 const SECTIONS = {
-  unclassified: { list: document.getElementById("unclassified"), count: document.getElementById("unclassified-count") },
-  triaged: { list: document.getElementById("triaged"), count: document.getElementById("triaged-count") },
-  resolved: { list: document.getElementById("resolved"), count: document.getElementById("resolved-count") },
+  unclassified: {
+    list: document.getElementById("unclassified"),
+    count: document.getElementById("unclassified-count"),
+    empty: document.getElementById("unclassified-empty"),
+  },
+  triaged: {
+    list: document.getElementById("triaged"),
+    count: document.getElementById("triaged-count"),
+    empty: document.getElementById("triaged-empty"),
+  },
+  resolved: { list: document.getElementById("resolved"), count: document.getElementById("resolved-count"), empty: null },
 };
+
+// Hub status header, polled independently of the report list.
+const statusNote = document.getElementById("status-note");
+const phoneUrl = document.getElementById("phone-url");
+const phoneUrlWrap = document.getElementById("phone-url-wrap");
+const phoneUrlUnavailable = document.getElementById("phone-url-unavailable");
+const phoneQr = document.getElementById("phone-qr");
+const modelStatus = document.getElementById("model-status");
+const workerNote = document.getElementById("worker-note");
+const audioStatus = document.getElementById("audio-status");
+const queueStatus = document.getElementById("queue-status");
+const processingStatus = document.getElementById("processing-status");
+const reportsToday = document.getElementById("reports-today");
+const localDate = document.getElementById("local-date");
+const urgencyCounts = document.getElementById("urgency-counts");
+const URGENCY_ORDER = ["critical", "high", "medium", "low"];
+
+// Triaged-lane urgency filter and a search over every card's text. Both only
+// hide cards; a card whose edit form is open always stays visible.
+const search = document.getElementById("search");
+const filterButtons = document.querySelectorAll("button[data-filter]");
+const filterNote = document.getElementById("filter-note");
+let urgencyFilter = "all";
 
 // Unclassified reports never carry an urgency word.
 const STATUS_LABELS = {
@@ -38,13 +70,20 @@ const BLANK_FIELDS = {
   injured: false, injury_note: null, needs: [], summary: "",
 };
 
-const cards = new Map(); // report id -> { node, key }
+const cards = new Map(); // report id -> { node, key, section }
 const actionStates = new Map(); // report id -> { pending, message, error }
 const editors = new Map(); // report id -> { report, form, notice, feedback, pending }
 let lastReports = [];
 let lastSuccess = null;
 let requested = 0;
 let rendered = 0;
+let renderedOnce = false; // no highlight for cards present on the first load
+
+// Status header state (kept across failed polls, with a stale warning).
+let lastStatus = null;
+let statusEverLoaded = false;
+let statusInFlight = false;
+let lastQrUrl = null;
 
 function timeText(date) {
   return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
@@ -84,17 +123,17 @@ function sectionOf(report) {
   return report.urgency ? "triaged" : "unclassified";
 }
 
+// The extracted fields as compact label/value chips. Facts that add nothing
+// (unknown headcount, nobody injured, no vulnerable group) are left out; the
+// edit form still shows every field.
 function fieldList(fields) {
-  const rows = [
-    ["Location", fields.location === null ? "unknown" : fields.location],
-    ["In center", yesNo(fields.in_center)],
-    ["Reporting for others", yesNo(fields.on_behalf)],
-    ["People", fields.headcount === null ? "unknown" : String(fields.headcount)],
-    ["Vulnerable", terms(fields.vulnerable)],
-    ["Injured", fields.injured ? "yes" + (fields.injury_note ? ": " + fields.injury_note : "") : "no"],
-    ["Needs", terms(fields.needs)],
-  ];
-  if (fields.summary) rows.push(["Summary", fields.summary]);
+  const rows = [["Location", fields.location === null ? "unknown" : fields.location]];
+  if (fields.in_center !== null) rows.push(["In center", yesNo(fields.in_center)]);
+  if (fields.on_behalf) rows.push(["For others", "yes"]);
+  if (fields.headcount !== null) rows.push(["People", String(fields.headcount)]);
+  if (fields.vulnerable.length) rows.push(["Vulnerable", terms(fields.vulnerable)]);
+  if (fields.injured) rows.push(["Injured", fields.injury_note ? fields.injury_note : "yes"]);
+  rows.push(["Needs", terms(fields.needs)]);
   const list = element("dl", "fields");
   for (const [name, value] of rows) {
     const row = element("div", "field-row");
@@ -140,7 +179,6 @@ function reportCard(report) {
   const item = element("li", "report");
   item.dataset.id = report.id;
   const header = element("div", "report-header");
-  header.append(element("span", "reference", "#" + report.id));
 
   if (report.urgency) {
     const label = URGENCY_LABELS[report.urgency] || report.urgency;
@@ -151,19 +189,22 @@ function reportCard(report) {
   } else {
     header.append(element("span", "status status-" + report.status, STATUS_LABELS[report.status] || "Status: " + report.status));
   }
+  header.append(element("span", "reference", "#" + report.id));
   item.append(header);
 
-  if (report.urgency && report.fields) item.append(fieldList(report.fields));
-  const notes = [];
-  if (report.edited) notes.push("Edited by staff");
-  if (report.llm_ms !== null && report.llm_ms !== undefined) notes.push("Extraction took " + (report.llm_ms / 1000).toFixed(1) + " s");
-  if (notes.length) item.append(element("p", "report-notes", notes.join(" · ")));
+  if (report.urgency && report.fields) {
+    item.append(fieldList(report.fields));
+    if (report.fields.summary) item.append(element("p", "report-summary", report.fields.summary));
+  }
 
   item.append(original(report, section !== "unclassified"));
-  const meta = element("p", "report-meta");
-  meta.textContent = (report.reporter ? "From " + report.reporter + " · " : "Name not given · ") + receivedText(report.created_at);
-  item.append(meta);
   if (report.error && !report.urgency) item.append(element("p", "report-error", "Error: " + report.error));
+
+  const meta = [report.reporter ? "From " + report.reporter : "Name not given", receivedText(report.created_at)];
+  if (report.edited) meta.push("Edited by staff");
+  if (report.llm_ms !== null && report.llm_ms !== undefined) meta.push("Extraction took " + (report.llm_ms / 1000).toFixed(1) + " s");
+  const footer = element("div", "report-footer");
+  footer.append(element("p", "report-meta", meta.join(" · ")));
 
   const feedback = element("p", "card-feedback");
   feedback.setAttribute("role", "status");
@@ -175,10 +216,13 @@ function reportCard(report) {
   if (report.resolved) {
     actions.append(actionButton("Reopen", "reopen", "secondary", () => act(report.id, "PATCH", path, { resolved: false })));
   } else {
-    actions.append(actionButton(report.fields ? "Edit" : "Complete by hand", "edit", "", () => openEditor(item, report)));
+    // Waiting reports keep their manual completion quiet; a failed one invites it.
+    const editClass = report.fields || report.status === "failed" ? "" : "secondary";
+    actions.append(actionButton(report.fields ? "Edit" : "Complete by hand", "edit", editClass, () => openEditor(item, report)));
     actions.append(actionButton("Mark resolved", "resolve", "secondary", () => act(report.id, "PATCH", path, { resolved: true })));
   }
-  item.append(actions, feedback);
+  footer.append(actions);
+  item.append(footer, feedback);
   showActionState(item, report.id);
   return item;
 }
@@ -397,6 +441,13 @@ function carryOver(oldCard, newCard) {
   return null;
 }
 
+// Outline a card once; the class goes when the animation ends (with reduced
+// motion there is no animation and the class is harmless).
+function highlight(node) {
+  node.classList.add("just-changed");
+  node.addEventListener("animationend", () => node.classList.remove("just-changed"), { once: true });
+}
+
 // Put `nodes` into `list` in order, moving only nodes that are out of place.
 function syncList(list, nodes) {
   nodes.forEach((node, index) => {
@@ -423,8 +474,10 @@ function render(reports) {
     }
     if (!entry || entry.key !== key) {
       const node = reportCard(report);
+      const section = sectionOf(report);
       if (entry) refocus.push(carryOver(entry.node, node));
-      entry = { node, key };
+      if (entry ? entry.section !== section : renderedOnce) highlight(node);
+      entry = { node, key, section };
       cards.set(report.id, entry);
     }
     seen.add(report.id);
@@ -436,11 +489,39 @@ function render(reports) {
   for (const [name, section] of Object.entries(SECTIONS)) {
     syncList(section.list, groups[name]);
     section.count.textContent = "(" + groups[name].length + ")";
+    if (section.empty) section.empty.hidden = groups[name].length > 0 || reports.length === 0;
   }
   if (active !== document.activeElement && active && active.isConnected) active.focus({ preventScroll: true });
   for (const button of refocus) if (button) button.focus();
   empty.hidden = reports.length > 0;
+  applyFilters();
+  renderedOnce = true;
 }
+
+function applyFilters() {
+  const query = search.value.trim().toLowerCase().replace(/^#/, "");
+  let shown = 0;
+  let total = 0;
+  for (const [id, entry] of cards) {
+    const urgencyMatch = entry.section !== "triaged" || urgencyFilter === "all" || entry.node.classList.contains("urgency-" + urgencyFilter);
+    const textMatch = !query || String(id) === query || entry.node.textContent.toLowerCase().includes(query);
+    entry.node.hidden = !editors.has(id) && !(urgencyMatch && textMatch);
+    total += 1;
+    if (!entry.node.hidden) shown += 1;
+  }
+  const filtering = Boolean(query) || urgencyFilter !== "all";
+  filterNote.hidden = !filtering;
+  filterNote.textContent = filtering ? "Showing " + shown + " of " + total + " reports" : "";
+}
+
+function setUrgencyFilter(value) {
+  urgencyFilter = value;
+  for (const button of filterButtons) button.setAttribute("aria-pressed", String(button.dataset.filter === value));
+  applyFilters();
+}
+
+for (const button of filterButtons) button.addEventListener("click", () => setUrgencyFilter(button.dataset.filter));
+search.addEventListener("input", applyFilters);
 
 function showConnection(ok) {
   if (ok) {
@@ -528,9 +609,96 @@ async function act(id, method, path, body) {
   }
 }
 
+function modelText(status) {
+  if (!status.model) return "No model configured; reports stay queued for triage.";
+  const checked = status.model_checked_at ? " (last checked " + timeText(new Date(status.model_checked_at)) + ")" : "";
+  if (status.model_state === "loaded") return "Loaded in Ollama: " + status.model + checked;
+  if (status.model_state === "not_loaded") return "Not loaded: " + status.model + checked;
+  if (status.model_state === "unavailable") return "Model unavailable: " + status.model + checked;
+  return "Model: " + status.model;
+}
+
+// Show the last successful status. Counts come only from that response; a
+// failed or held status poll leaves them untouched and just shows a warning.
+function renderStatus() {
+  const status = lastStatus;
+  if (!status) return;
+
+  if (status.hub_url) {
+    phoneUrl.textContent = status.hub_url;
+    phoneUrl.href = status.hub_url;
+    phoneUrlWrap.hidden = false;
+    phoneUrlUnavailable.hidden = true;
+    if (status.hub_url !== lastQrUrl) {
+      lastQrUrl = status.hub_url;
+      phoneQr.src = "/api/qr";
+      phoneQr.hidden = false;
+    }
+  } else {
+    phoneUrlWrap.hidden = true;
+    phoneQr.hidden = true;
+    if (lastQrUrl !== null) {
+      lastQrUrl = null;
+      phoneQr.removeAttribute("src");
+    }
+    phoneUrlUnavailable.hidden = false;
+    phoneUrlUnavailable.textContent =
+      "No phone address is shown. Open this board from the hub's Wi-Fi IPv4 address (for example http://192.168.1.20/board) or set SILONG_HUB_URL to that address.";
+  }
+
+  modelStatus.textContent = modelText(status);
+  workerNote.hidden = !(status.model && status.model_state === "loaded" && !status.worker_running);
+  if (!workerNote.hidden) workerNote.textContent = "The triage worker is not running.";
+  audioStatus.textContent = status.audio_available ? "Audio accepted" : "Text only: audio unavailable";
+  queueStatus.textContent = "Queued: " + status.queue_length;
+  processingStatus.textContent = "Processing: " + status.processing_count;
+  reportsToday.textContent = status.reports_today + " report(s)";
+  localDate.textContent = status.local_date;
+
+  urgencyCounts.replaceChildren();
+  for (const level of URGENCY_ORDER) {
+    const item = element("li", "urgency-" + level);
+    item.append(element("span", "urgency-label", URGENCY_LABELS[level] || level));
+    item.append(element("span", "count", String(status.urgency_counts[level] ?? 0)));
+    urgencyCounts.append(item);
+  }
+}
+
+function setStatusStale(stale) {
+  statusNote.hidden = !stale;
+  if (stale) {
+    statusNote.textContent = "Status may be out of date; the values shown are the last received.";
+  }
+}
+
+async function loadStatus() {
+  if (statusInFlight) return;
+  statusInFlight = true;
+  try {
+    const response = await fetchWithTimeout("/api/status");
+    if (!response.ok) throw new Error("HTTP " + response.status);
+    const data = await response.json();
+    if (!data || typeof data !== "object" || typeof data.snapshot_at !== "string") throw new Error("unexpected response");
+    lastStatus = data;
+    statusEverLoaded = true;
+    setStatusStale(false);
+    renderStatus();
+  } catch (error) {
+    if (statusEverLoaded) setStatusStale(true);
+  } finally {
+    statusInFlight = false;
+  }
+}
+
+async function pollStatus() {
+  await loadStatus();
+  setTimeout(pollStatus, POLL_MS);
+}
+
 async function poll() {
   await load();
   setTimeout(poll, POLL_MS);
 }
 
 poll();
+pollStatus();

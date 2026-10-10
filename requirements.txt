@@ -1,6 +1,7 @@
 # Base runtime, pinned to the versions installed and tested (01-T1).
-# Optional audio (faster-whisper) and QR (qrcode) dependencies are added in later phases.
+# QR is added in phase 03; optional audio (faster-whisper) arrives in phase 04.
 fastapi==0.143.0
 uvicorn==0.54.0
 httpx==0.28.1
 python-multipart==0.0.32
+qrcode==8.2

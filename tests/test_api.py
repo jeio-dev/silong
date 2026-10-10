@@ -578,6 +578,7 @@ class PageTest(ApiTestCase):
     ASSETS = {
         "/static/report.js": "javascript",
         "/static/board.js": "javascript",
+        "/static/outbox.js": "javascript",
         "/static/style.css": "text/css",
     }
 
@@ -617,14 +618,29 @@ class PageTest(ApiTestCase):
 
     def test_pages_use_no_remote_assets_or_unsafe_rendering(self):
         sources = {path: self.client.get(path).text for path in ("/", "/board", *self.ASSETS)}
+        # Reject actual remote asset/fetch targets; a literal local IPv4 address
+        # in displayed text (the board's phone-URL hint) is allowed.
+        banned = (
+            "https://",  # the hub is plain HTTP only
+            "//cdn",
+            'src="http',
+            "src='http",
+            'href="http',
+            "href='http",
+            'url("http',
+            "url('http",
+            'fetch("http',
+            "fetch('http",
+            "fetch(`http",
+            "@import",
+            "innerHTML",
+            "insertAdjacentHTML",
+            "serviceWorker",
+        )
         for path, source in sources.items():
             with self.subTest(path=path):
-                self.assertNotIn("http://", source)
-                self.assertNotIn("https://", source)
-                self.assertNotIn("//cdn", source)
-                self.assertNotIn("innerHTML", source)
-                self.assertNotIn("insertAdjacentHTML", source)
-                self.assertNotIn("serviceWorker", source)
+                for piece in banned:
+                    self.assertNotIn(piece, source)
         # crypto.randomUUID needs a secure context; the hub serves plain HTTP.
         self.assertNotIn("randomUUID(", sources["/static/report.js"])
         self.assertIn("crypto.getRandomValues", sources["/static/report.js"])

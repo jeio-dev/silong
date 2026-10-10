@@ -4,14 +4,23 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Silong: send a report</title>
+  <link rel="icon" href="/static/silong-icon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/static/style.css">
 </head>
-<body>
+<body class="reporter-page">
+  <header class="topbar">
+    <div class="topbar-inner">
+      <span class="brand"><svg class="brand-mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true" focusable="false"><rect width="64" height="64" rx="14" fill="#14315C"/><path d="M11 31 L32 13 L53 31" fill="none" stroke="#FFFFFF" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/><circle cx="27" cy="38.5" r="4" fill="#FFFFFF"/><path d="M19.5 54 A7.5 7.5 0 0 1 34.5 54 Z" fill="#FFFFFF"/><circle cx="39" cy="43" r="3.2" fill="#F5A524"/><path d="M33.5 54 A5.5 5.5 0 0 1 44.5 54 Z" fill="#F5A524"/></svg><span class="brand-name">Silong</span></span>
+      <span class="topbar-tag">Evacuation center</span>
+    </div>
+  </header>
   <main class="page">
-    <h1>Silong</h1>
-    <p class="lead">Send a report to the evacuation center staff. Magpadala ng ulat sa mga staff ng evacuation center.</p>
+    <div class="intro">
+      <h1>Send a report <span class="h1-sub" lang="fil">Magpadala ng ulat</span></h1>
+      <p class="lead">Tell the evacuation center staff who needs help. Sabihin sa mga staff kung sino ang nangangailangan ng tulong.</p>
+    </div>
 
-    <form id="report-form" novalidate>
+    <form id="report-form" class="card form-card" novalidate>
       <div class="field">
         <label for="reporter">Your name (optional) / Pangalan (opsyonal)</label>
         <input id="reporter" name="reporter" type="text" autocomplete="name" maxlength="200">
@@ -23,15 +32,33 @@
       </div>
       <div class="actions">
         <button id="send" type="submit">Send report / Ipadala</button>
-        <button id="retry" type="button" hidden>Try again / Subukan ulit</button>
-        <button id="new-report" type="button" class="secondary" hidden>Start a new report</button>
+        <button id="new-report" type="button" class="secondary" hidden>Start a new report / Magsimula ng bagong report</button>
       </div>
     </form>
 
     <div id="feedback" class="feedback" role="status" aria-live="polite" tabindex="-1"></div>
 
-    <p class="note">Keep this page open until you see a reference number. This page does not save reports offline yet; if sending fails, press Try again when you are connected to the center's Wi-Fi.</p>
+    <section class="queue" aria-labelledby="pending-heading">
+      <h2 id="pending-heading">Waiting to send <span id="pending-count" class="count"></span></h2>
+      <p id="storage-note" class="hint" hidden></p>
+      <p class="hint">Reports are kept on this phone until the hub confirms them with a reference number.</p>
+      <ol id="pending-list" class="reports"></ol>
+      <div class="actions">
+        <button id="retry-now" type="button" class="secondary" hidden>Try again now / Subukan muli ngayon</button>
+      </div>
+    </section>
+
+    <section class="queue" aria-labelledby="received-heading">
+      <h2 id="received-heading">Received by the hub <span id="received-count" class="count"></span></h2>
+      <ol id="received-list" class="reports"></ol>
+    </section>
+
+    <footer class="note">
+      <p>Keep this page open on this Wi-Fi until each report has a reference number. Saved reports resend automatically while the page is open, or the next time this same address opens.</p>
+      <p lang="fil">Huwag isara ang page na ito habang nasa Wi-Fi na ito hanggang may reference number ang bawat report. Kusang ipapadala muli ang mga naka-save na report habang bukas ang page, o sa susunod na buksan ang address na ito.</p>
+    </footer>
   </main>
+  <script src="/static/outbox.js"></script>
   <script src="/static/report.js"></script>
 </body>
 </html>
