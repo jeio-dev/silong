@@ -24,3 +24,7 @@ audio/
 
 # Local runtime evidence that may contain real reports; keep committed evidence synthetic
 local/
+
+1MINDEMO.md
+silong-video/
+silong-video-with-music/
