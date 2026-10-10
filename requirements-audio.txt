@@ -1,3 +1,4 @@
 # Optional local audio (04): install to enable SILONG_WHISPER=base or small.
 # Without it the hub runs text-only and the form hides audio.
 faster-whisper==1.2.1
+av==15.1.0  # av 19 (tested) rejects an argument faster-whisper 1.2.1 passes when decoding
