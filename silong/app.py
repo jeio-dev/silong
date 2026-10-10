@@ -47,6 +47,7 @@ def _report_view(row: dict) -> dict:
     """A stored row as the board sees it; server-side paths are not exposed."""
     view = {key: value for key, value in row.items() if key not in ("fields_json", "audio_path")}
     view["fields"] = json.loads(row["fields_json"]) if row["fields_json"] else None
+    view["has_audio"] = bool(row["audio_path"])
     view["edited"] = bool(row["edited"])
     view["resolved"] = bool(row["resolved"])
     return view

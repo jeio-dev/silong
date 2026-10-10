@@ -143,11 +143,26 @@ function fieldList(fields) {
   return list;
 }
 
+// Typed text and, for a voice report, its transcript: both originals stay
+// visible for staff to check against the extracted fields.
 function original(report, collapsed) {
-  const text = element("p", "report-text", report.raw_text);
-  if (!collapsed) return text;
+  const parts = [];
+  if (report.raw_text && report.raw_text.trim()) parts.push(element("p", "report-text", report.raw_text));
+  if (report.has_audio) {
+    const transcript = element("p", "report-text transcript");
+    transcript.append(element("strong", "", "Voice: "));
+    transcript.append(report.transcript === null || report.transcript === undefined
+      ? "recording received, not yet transcribed"
+      : report.transcript.trim() || "(no speech heard)");
+    parts.push(transcript);
+  }
+  if (!collapsed) {
+    const box = element("div", "original-open");
+    box.append(...parts);
+    return box;
+  }
   const details = element("details", "original");
-  details.append(element("summary", "", "Original report"), text);
+  details.append(element("summary", "", report.has_audio ? "Original report and voice transcript" : "Original report"), ...parts);
   return details;
 }
 
@@ -202,6 +217,7 @@ function reportCard(report) {
 
   const meta = [report.reporter ? "From " + report.reporter : "Name not given", receivedText(report.created_at)];
   if (report.edited) meta.push("Edited by staff");
+  if (report.asr_ms !== null && report.asr_ms !== undefined) meta.push("Transcription took " + (report.asr_ms / 1000).toFixed(1) + " s");
   if (report.llm_ms !== null && report.llm_ms !== undefined) meta.push("Extraction took " + (report.llm_ms / 1000).toFixed(1) + " s");
   const footer = element("div", "report-footer");
   footer.append(element("p", "report-meta", meta.join(" · ")));
