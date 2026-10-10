@@ -7,6 +7,7 @@ only after it is committed to SQLite.
 
 import json
 import logging
+import os
 import re
 import sqlite3
 from contextlib import asynccontextmanager
@@ -14,6 +15,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from fastapi import FastAPI, HTTPException, Request, Response
+from starlette.datastructures import UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
@@ -30,6 +32,13 @@ STORAGE_ERROR = "The hub could not save or read reports right now. Please try ag
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 NOT_FOUND = "No report has that id."
 PATCH_KEYS = ("fields", "resolved")
+# Audio uploads: a size cap well above a minute of phone recording, and the
+# suffixes kept on saved files (anything else is stored as .audio; Whisper
+# probes the content either way).
+MAX_AUDIO_BYTES = 20 * 1024 * 1024
+AUDIO_SUFFIXES = {".m4a", ".mp3", ".wav", ".ogg", ".oga", ".opus", ".webm", ".aac", ".amr", ".3gp", ".mp4", ".flac"}
+AUDIO_UNAVAILABLE = "Audio is not available on this hub right now; please type the report."
+AUDIO_TOO_LARGE = "The audio file is too large (limit 20 MB); record a shorter message."
 # Report ids are positive and at most SQLite's largest integer; others cannot name a report.
 MAX_ID = 2**63 - 1
 
@@ -50,6 +59,37 @@ def _form_text(form, name: str) -> Optional[str]:
     if not isinstance(value, str):
         raise HTTPException(422, f"{name} must be a text field, not a file.")
     return value
+
+
+async def _save_audio(upload: UploadFile, audio_dir: Path, client_id: str) -> str:
+    """Durably store an uploaded audio file as `<client_id><suffix>` in
+    `audio_dir` and return that file name. A file already stored for this
+    client_id is kept: a repeat is the same outbox recording."""
+    suffix = Path(upload.filename or "").suffix.lower()
+    if suffix not in AUDIO_SUFFIXES:
+        suffix = ".audio"
+    name = client_id + suffix
+    target = audio_dir / name
+    if target.exists():
+        return name
+    audio_dir.mkdir(parents=True, exist_ok=True)
+    partial = audio_dir / (name + ".part")
+    size = 0
+    try:
+        with open(partial, "wb") as out:
+            while chunk := await upload.read(1024 * 1024):
+                size += len(chunk)
+                if size > MAX_AUDIO_BYTES:
+                    raise HTTPException(413, AUDIO_TOO_LARGE)
+                out.write(chunk)
+            out.flush()
+            os.fsync(out.fileno())
+        if size == 0:
+            raise HTTPException(422, "The audio file is empty.")
+        os.replace(partial, target)
+    finally:
+        partial.unlink(missing_ok=True)
+    return name
 
 
 def _parse_patch(body) -> tuple[Optional[dict], Optional[bool]]:
@@ -78,6 +118,7 @@ def _start_worker(
     config: Config,
     extract: Optional[Callable[[str], dict]],
     warm_up: Optional[Callable[[], None]],
+    transcribe: Optional[Callable[[str], str]] = None,
 ):
     """Start the extraction worker. Imported here so a hub without a model never
     loads the worker, the Ollama client or httpx."""
@@ -96,9 +137,16 @@ def _start_worker(
             def warm_up() -> None:
                 extraction.warm_up(model)
 
-    worker = Worker(config.db_path, extract, warm_up)
+    worker = Worker(
+        config.db_path, extract, warm_up, transcribe=transcribe, audio_dir=_audio_dir(config)
+    )
     worker.start()
     return worker
+
+
+def _audio_dir(config: Config) -> Path:
+    """Uploaded audio lives in `audio/` beside the database."""
+    return config.db_path.parent / "audio"
 
 
 def create_app(
@@ -106,6 +154,7 @@ def create_app(
     *,
     extract: Optional[Callable[[str], dict]] = None,
     warm_up: Optional[Callable[[], None]] = None,
+    transcribe: Optional[Callable[[str], str]] = None,
 ) -> FastAPI:
     """Build the app. `config` defaults to the SILONG_* environment.
 
@@ -113,6 +162,10 @@ def create_app(
     `extract(text) -> fields` (default: Ollama with that model). `warm_up` runs
     once when the worker starts; it defaults to loading the Ollama model, or to
     nothing when `extract` is injected. With no model, reports stay queued.
+
+    Audio is accepted only while a transcriber exists: `transcribe(path) -> text`
+    if given, else Whisper per `config.whisper` loaded at startup (None when
+    off or when it cannot load; the hub then stays text-only).
     """
     if config is None:
         config = load_config()
@@ -123,7 +176,13 @@ def create_app(
         requeued = db.recover_interrupted(config.db_path)
         if requeued:
             logger.info("Requeued %d report(s) interrupted by the last stop", requeued)
-        app.state.worker = _start_worker(config, extract, warm_up) if config.model else None
+        if app.state.transcribe is None and config.whisper != "off":
+            from silong import transcribe as transcription
+
+            app.state.transcribe = await run_in_threadpool(transcription.load, config.whisper)
+        app.state.worker = (
+            _start_worker(config, extract, warm_up, app.state.transcribe) if config.model else None
+        )
         try:
             yield
         finally:
@@ -133,25 +192,37 @@ def create_app(
     app = FastAPI(title="Silong", lifespan=lifespan)
     app.state.config = config
     app.state.worker = None
+    app.state.transcribe = transcribe
 
     @app.post("/api/reports")
     async def create_report(request: Request) -> dict:
         async with request.form() as form:
-            if "audio" in form:
-                raise HTTPException(422, "Audio reports are not supported yet; send text.")
             client_id = _form_text(form, "client_id")
             text = _form_text(form, "text")
             reporter = _form_text(form, "reporter")
+            audio = form.get("audio")
+            if audio is not None and not isinstance(audio, UploadFile):
+                raise HTTPException(422, "audio must be a file.")
 
-        if client_id is None or not UUID_PATTERN.fullmatch(client_id):
-            raise HTTPException(422, "client_id must be a UUID string.")
-        if text is None or not text.strip():
-            raise HTTPException(422, "Report text is required.")
+            if client_id is None or not UUID_PATTERN.fullmatch(client_id):
+                raise HTTPException(422, "client_id must be a UUID string.")
+            client_id = client_id.lower()
+            if audio is None and (text is None or not text.strip()):
+                raise HTTPException(422, "Report text is required.")
+            audio_path = None
+            if audio is not None:
+                if app.state.transcribe is None:
+                    raise HTTPException(422, AUDIO_UNAVAILABLE)
+                try:
+                    audio_path = await _save_audio(audio, _audio_dir(config), client_id)
+                except OSError:
+                    logger.exception("Could not store audio")
+                    raise HTTPException(503, STORAGE_ERROR)
         reporter = (reporter or "").strip() or None
 
         try:
             row, _created = await run_in_threadpool(
-                db.insert_report, config.db_path, client_id.lower(), text, reporter
+                db.insert_report, config.db_path, client_id, text or "", reporter, audio_path
             )
         except sqlite3.Error:
             logger.exception("Could not store report")
@@ -234,6 +305,7 @@ def create_app(
             model_state=model_state,
             model_checked_at=model_checked_at,
             worker_running=worker_running,
+            audio_available=app.state.transcribe is not None,
         )
 
     @app.get("/api/qr")

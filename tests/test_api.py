@@ -98,7 +98,7 @@ class ApiTestCase(unittest.TestCase):
 
     def open_client(self, model=None, **app_options):
         """Open the app; no worker runs unless a test passes a model (with a fake `extract`)."""
-        config = Config(model=model, whisper="small", port=8000, db_path=self.path)
+        config = Config(model=model, whisper="off", port=8000, db_path=self.path)
         client = TestClient(create_app(config, **app_options))
         client.__enter__()
         self.addCleanup(client.__exit__, None, None, None)

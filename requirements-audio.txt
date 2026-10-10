@@ -1,0 +1,3 @@
+# Optional local audio (04): install to enable SILONG_WHISPER=base or small.
+# Without it the hub runs text-only and the form hides audio.
+faster-whisper==1.2.1

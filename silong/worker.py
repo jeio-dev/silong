@@ -10,15 +10,19 @@ import logging
 import sqlite3
 import threading
 import time
+from pathlib import Path
 from typing import Callable, Optional
 
 from silong import db, rules
 from silong.db import PathLike
 from silong.extract import ExtractionError
+from silong.transcribe import TranscriptionError
 
 logger = logging.getLogger(__name__)
 
 UNEXPECTED_ERROR = "Unexpected processing error; retry or complete by hand"
+NO_TRANSCRIBER = "Audio transcription is unavailable on this hub; listen on the hub or complete by hand"
+NO_SPEECH = "No speech was heard in the audio; listen on the hub or complete by hand"
 # Fallback poll interval; receipt and retry wake the worker immediately.
 IDLE_WAIT = 2.0
 JOIN_TIMEOUT = 5.0
@@ -28,7 +32,9 @@ class Worker:
     """Run `extract(text) -> fields` over queued reports in `db_path`.
 
     `warm_up()`, if given, is called once when the thread starts; any failure
-    is only logged.
+    is only logged. A report with audio is first transcribed with
+    `transcribe(path) -> text` (audio files live in `audio_dir`); typed text and
+    transcript are then joined for one extraction.
     """
 
     def __init__(
@@ -38,10 +44,14 @@ class Worker:
         warm_up: Optional[Callable[[], None]] = None,
         *,
         idle_wait: float = IDLE_WAIT,
+        transcribe: Optional[Callable[[str], str]] = None,
+        audio_dir: Optional[PathLike] = None,
     ):
         self.db_path = db_path
         self.extract = extract
         self.warm_up = warm_up
+        self.transcribe = transcribe
+        self.audio_dir = audio_dir
         self.idle_wait = idle_wait
         self._wake = threading.Event()
         self._stop = threading.Event()
@@ -91,14 +101,40 @@ class Worker:
                 continue
             self._process(row)
 
+    def _input_text(self, row: dict) -> Optional[str]:
+        """The text to extract from: typed text plus any transcript, transcribing
+        (and storing the transcript) first when needed. None means the report
+        was marked failed or the worker is stopping."""
+        text = (row["raw_text"] or "").strip()
+        if not row["audio_path"]:
+            return row["raw_text"]
+        transcript = row["transcript"]
+        if transcript is None:
+            if self.transcribe is None or self.audio_dir is None:
+                self._retrying_write(db.mark_failed, row["id"], NO_TRANSCRIBER)
+                return None
+            started = time.monotonic()
+            transcript = self.transcribe(str(Path(self.audio_dir) / row["audio_path"]))
+            asr_ms = round((time.monotonic() - started) * 1000)
+            if not self._retrying_write(db.save_transcript, row["id"], transcript, asr_ms):
+                return None
+        combined = "\n".join(part for part in (text, transcript.strip()) if part)
+        if not combined:
+            self._retrying_write(db.mark_failed, row["id"], NO_SPEECH)
+            return None
+        return combined
+
     def _process(self, row: dict) -> None:
         report_id = row["id"]
-        started = time.monotonic()
         try:
-            fields = self.extract(row["raw_text"])
+            text = self._input_text(row)
+            if text is None:
+                return
+            started = time.monotonic()
+            fields = self.extract(text)
             llm_ms = round((time.monotonic() - started) * 1000)
             urgency, reason = rules.classify(fields)
-        except ExtractionError as exc:
+        except (ExtractionError, TranscriptionError) as exc:
             logger.warning("Report %s failed extraction: %s", report_id, exc)
             self._retrying_write(db.mark_failed, report_id, str(exc))
             return

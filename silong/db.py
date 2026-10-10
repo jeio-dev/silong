@@ -58,7 +58,11 @@ def _utc_now() -> str:
 
 
 def insert_report(
-    db_path: PathLike, client_id: str, raw_text: str, reporter: Optional[str] = None
+    db_path: PathLike,
+    client_id: str,
+    raw_text: str,
+    reporter: Optional[str] = None,
+    audio_path: Optional[str] = None,
 ) -> tuple[dict, bool]:
     """Store a new queued report, or return the existing one for `client_id`.
 
@@ -70,9 +74,9 @@ def insert_report(
         conn.execute("BEGIN IMMEDIATE")
         try:
             cursor = conn.execute(
-                "INSERT INTO reports (client_id, created_at, reporter, raw_text)"
-                " VALUES (?, ?, ?, ?) ON CONFLICT(client_id) DO NOTHING",
-                (client_id, _utc_now(), reporter, raw_text),
+                "INSERT INTO reports (client_id, created_at, reporter, raw_text, audio_path)"
+                " VALUES (?, ?, ?, ?, ?) ON CONFLICT(client_id) DO NOTHING",
+                (client_id, _utc_now(), reporter, raw_text, audio_path),
             )
             created = cursor.rowcount == 1
             row = conn.execute(
@@ -134,6 +138,19 @@ def save_extraction(
             " status = 'done', error = NULL"
             " WHERE id = ? AND status = 'extracting' AND edited = 0",
             (json.dumps(fields), urgency, reason, llm_ms, report_id),
+        )
+        == 1
+    )
+
+
+def save_transcript(db_path: PathLike, report_id: int, transcript: str, asr_ms: int) -> bool:
+    """Store a worker transcript and its measured time, unless the report is no
+    longer `extracting`. Kept even if extraction later fails, so retry reuses it."""
+    return (
+        _write(
+            db_path,
+            "UPDATE reports SET transcript = ?, asr_ms = ? WHERE id = ? AND status = 'extracting'",
+            (transcript, asr_ms, report_id),
         )
         == 1
     )
