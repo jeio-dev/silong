@@ -39,7 +39,7 @@ The model never decides who goes first. It only extracts fields, and staff can s
 | Text reports with phone outbox (IndexedDB), automatic retries, duplicate-safe references | Built and tested |
 | Local AI extraction with Ollama, code-based urgency rules, sorting, staff edits, resolve, retry, restart recovery | Built and tested |
 | Staff board with a status header showing the phone URL, a local QR code, model state, queue and urgency counts | Built and tested |
-| Audio reports with local Whisper transcription | **Not built.** It was planned (`SILONG_WHISPER` is accepted but has no effect) and was dropped for the deadline. The form is text only. |
+| Optional voice reports with local Whisper transcription (off by default) | Built and tested on the development hub in Chromium; **not tried on a real phone**. See [Optional voice reports](#optional-voice-reports). |
 | Verification on the target demo hardware (hub directly on Windows 11, Galaxy A54 over Wi-Fi with internet off) | **Not done.** See [Tested platforms](#tested-platforms). |
 
 ## Demo video
@@ -56,7 +56,7 @@ All inference runs on the hub through [Ollama](https://ollama.com). Nothing is s
 | --- | --- | --- | --- |
 | `gemma4:e2b` (Google Gemma 4 E2B) | **Chosen** extraction model; set with `SILONG_MODEL=gemma4:e2b` | digest `b37049369adf`, 4,587,156,505 bytes (about 4.6 GB), Q4_K_M | Priority 5/5, fields 34/40; cold load 24.0 s; extraction 7.5–9.7 s once warm, 33.9 s for the first report |
 | `qwen3:4b` (Alibaba Qwen3 4B) | Compared, not chosen (more accurate, about twice as slow) | digest `359d7dd4bcda`, 2,497,293,931 bytes, Q4_K_M | Priority 5/5, fields 37/40; cold load 13.7 s; extraction 16.0–19.3 s once warm, 63.9 s for the first report |
-| Whisper (faster-whisper) | Planned for audio; **not used** | — | — |
+| Whisper `base` (faster-whisper, CPU int8, multilingual) | Optional transcription of voice reports; set with `SILONG_WHISPER=base` | Systran `faster-whisper-base` from Hugging Face (about 142 MB on disk), downloaded on first start | Load 1.4–2.5 s; an 11.1 s synthetic clip took 3.1–3.5 s alone and 4.8 s inside the hub (single runs). `small` was not measured. |
 
 The model is called with `temperature: 0`, `think: false`, `keep_alive: -1` (stays loaded) and a JSON schema as the output `format`. The prompt has a fixed prefix with the report text last. Full results, including every expected and actual field, are in [Five-report model test](#five-report-model-test). Check each model's page on ollama.com for its license.
 
@@ -232,13 +232,30 @@ Set these environment variables before starting the hub. Blank or absent values 
 | Variable | Values | Default |
 | --- | --- | --- |
 | `SILONG_MODEL` | Ollama model tag, for example `gemma4:e2b` | none (no AI triage; reports stay queued) |
-| `SILONG_WHISPER` | `small`, `base`, `off` | `off` (accepted but unused: audio is not built) |
+| `SILONG_WHISPER` | `small`, `base`, `off` | `off` (text only; see [Optional voice reports](#optional-voice-reports)) |
 | `SILONG_PORT` | 1–65535 | `8000` |
 | `SILONG_DB` | SQLite file path | `silong.db` |
 | `OLLAMA_HOST` | Ollama's address: `host`, `host:port` or a full `http://` URL | `http://127.0.0.1:11434` |
 | `SILONG_HUB_URL` | The address phones should use, for example `http://192.168.1.20:8000` | none (the board's own address, see [Connect phones](#connect-phones)) |
 
 An invalid `SILONG_PORT`, `SILONG_WHISPER` or `SILONG_HUB_URL` is rejected at startup with a message naming the variable. `SILONG_HUB_URL` must be plain `http://` with a numeric IPv4 address that is not `127.x` or `0.0.0.0`, an optional port and no path; hostnames, `localhost` and `https://` are refused. Without a port it means port 80, so include `:8000` (or your `SILONG_PORT`). The hub only checks the format: it cannot tell whether phones can actually reach that address. `OLLAMA_HOST` is Ollama's own variable; the hub reads it to find Ollama. A bare host gets `http://` and port 11434, and a listen-all value such as `0.0.0.0` (which tells the Ollama server to accept connections from the network) is treated as `127.0.0.1`. An unusable `OLLAMA_HOST` does not stop the hub; each report's triage fails with a message saying so.
+
+## Optional voice reports
+
+Off by default. To turn it on, install the extra packages once (internet needed for this step and for the first start, which downloads the Whisper model):
+
+```sh
+python -m pip install -r requirements-audio.txt
+SILONG_WHISPER=base SILONG_MODEL=gemma4:e2b python -m silong
+```
+
+- The phone form then shows a **Voice recording** field. It opens the phone's file or recorder picker (browsers allow in-page recording only over HTTPS, which the hub does not use). A report can be a recording alone, text alone, or both. Files up to 20 MB are accepted.
+- The recording is saved in the phone's outbox with the text and retries the same way. The hub saves it in `audio/` beside the database before it confirms receipt; a repeated report creates no second copy.
+- The worker transcribes the recording on the CPU, joins the typed text and the transcript, and runs one extraction. The card shows both originals, the transcript under **Voice**, and the measured transcription time.
+- If Whisper cannot load (packages missing, model not downloaded), the hub logs it, keeps running text-only, and the form hides the recording field.
+- `requirements-audio.txt` pins PyAV 15.1: PyAV 19 fails to decode with faster-whisper 1.2.1.
+
+End-to-end check on the development hub (Chromium phone viewport, synthetic m4a, `gemma4:e2b`): receipt in 103 ms; transcription 4.8 s; extraction 15.1 s; the card showed Critical, "rescue needed outside center". A second check blocked two sends and reloaded the page; the recording came back from the outbox and arrived byte-for-byte identical.
 
 ## Local AI triage
 
@@ -259,7 +276,7 @@ The status header at the top is refreshed every two seconds as well, separately 
 
 - **Phones report here**: the address phones should open, as a link and a QR code drawn on the hub (no internet needed). When no usable address is known (board opened through `localhost`, and no `SILONG_HUB_URL`), the link and QR are hidden and the header says how to fix it.
 - **Model**: "Loaded in Ollama" or "Not loaded", with the time Ollama was last asked, or "Model unavailable" if Ollama did not give a usable answer within one second. This only says whether the model is in Ollama's memory; it does not mean extraction is correct or fast. "The triage worker is not running" appears separately if the worker thread has stopped. Without `SILONG_MODEL` it says no model is configured.
-- **Audio**: "Text only: audio unavailable".
+- **Audio**: "Audio accepted" when Whisper loaded, otherwise "Text only: audio unavailable".
 - **Queue**: *Queued* counts reports waiting for triage; *Processing* counts the one being extracted. Failed and staff-completed reports are not counted here.
 - **Today**: every report received since midnight on the hub's clock (local date shown), including resolved and failed ones.
 - **Unresolved by urgency**: Critical, High, Medium and Low counts of triaged reports that are not resolved.
@@ -346,7 +363,7 @@ Run on the hardware above with five synthetic Taglish reports, one run per model
 
 ## Limitations
 
-- Text only. Audio reports and Whisper transcription were planned but not built.
+- Voice reports were tested only in desktop Chromium with a synthetic clip made by Windows text-to-speech (English voice). Transcription of real Taglish speech, the Galaxy A54's recorder formats and file sizes, and `small` versus `base` were not measured. The phone page is plain HTTP, so it cannot record in the browser; it opens the phone's file or recorder picker instead.
 - Extraction runs on the CPU and takes seconds to tens of seconds per report; reports wait in order while one is extracted.
 - The model makes mistakes. In the test above both models missed a stated headcount and added a medical need the report did not state, `qwen3:4b` left one location empty, and `gemma4:e2b` got one "reporting for others" flag wrong and shortened or reworded locations. Staff must review cards and correct them.
 - One hub. If the hub computer fails, reports on it are unavailable until it is back; there is no second hub or sync.
