@@ -356,3 +356,14 @@ Run on the hardware above with five synthetic Taglish reports, one run per model
 - All checks so far ran the hub inside WSL against Ollama on Windows, not the hub directly on Windows. The offline checks switched off the browser's network, not Wi-Fi, and the phone was Chromium emulating a phone screen on the hub itself.
 - Setting `OLLAMA_HOST=0.0.0.0` on Windows makes Ollama reachable by every device on the same Wi-Fi while it runs. It is needed only for a hub inside WSL. For the Windows-native hub, remove that Windows variable, restart Ollama, and leave `OLLAMA_HOST` unset so both use `127.0.0.1`.
 - The demo video is an animated recreation, not a recording of the running app (see [Demo video](#demo-video)).
+
+## Citation
+
+```bibtex
+@software{jeio-dev2026silong,
+  author = {Dela Cruz, R-John},
+  title  = {Silong: An offline report and triage hub for evacuation centers},
+  year   = {2026},
+  url    = {https://github.com/jeio-dev/silong}
+}
+```
